@@ -6,6 +6,7 @@ import '../../core/constants.dart';
 import '../../widgets/main_app_bar.dart';
 import '../../services/product_service.dart';
 import '../../models/product.dart';
+import '../../core/uuid_utils.dart';
 import '../../core/utils.dart';
 import 'package:intl/intl.dart';
 import '../../widgets/responsive_layout.dart';
@@ -13,6 +14,7 @@ import '../../widgets/app_sidebar.dart';
 import '../../services/menu_service.dart';
 import '../../services/user_provider.dart';
 import '../../models/user_model.dart';
+import '../../services/transfer_provider.dart';
 
 import '../../services/product_seeder.dart';
 
@@ -101,6 +103,17 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                               .where((p) => p.name.toLowerCase().contains(_searchQuery.toLowerCase()) || 
                                              p.category.toLowerCase().contains(_searchQuery.toLowerCase()))
                               .toList();
+
+                          // Sort: Priced products and higher quantity first
+                          activeProducts.sort((a, b) {
+                            // 1. Priced products (price > 0) come first
+                            final bool aPriced = a.retailPrice > 0;
+                            final bool bPriced = b.retailPrice > 0;
+                            if (aPriced != bPriced) return aPriced ? -1 : 1;
+                            
+                            // 2. Products with higher quantity come first
+                            return b.stockQuantity.compareTo(a.stockQuantity);
+                          });
                           
                           if (activeProducts.isEmpty) {
                             return Center(
@@ -150,7 +163,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
           child: TextField(
             onChanged: (v) => setState(() => _searchQuery = v),
             decoration: InputDecoration(
-              hintText: 'Search by Name (e.g. Beef), Category (e.g. Pork), or both...',
+              hintText: 'Search by Name (e.g. Cow), Category (e.g. Pork), or both...',
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _searchQuery.isNotEmpty 
                 ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _searchQuery = ''))
@@ -185,8 +198,22 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
   Widget _buildHeader(BuildContext context, WidgetRef ref, List<Product> products, {required bool isAdmin}) {
     final theme = Theme.of(context);
     final isMobile = ResponsiveLayout.isMobile(context);
+    final pendingTransfers = ref.watch(pendingIncomingTransfersProvider);
 
     final actionButtons = [
+      if (pendingTransfers.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: ElevatedButton.icon(
+            onPressed: () => Navigator.pushNamed(context, '/cashier/verify-stock'),
+            icon: const Icon(Icons.qr_code_scanner, size: 18),
+            label: Text('Verify Incoming (${pendingTransfers.length})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade800,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ),
       if (isAdmin) ...[
         OutlinedButton.icon(
           onPressed: () => _showPromotionDialog(context, ref, products),
@@ -446,7 +473,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                           itemBuilder: (context, index) {
                             final p = products[index];
                             return CheckboxListTile(
-                              title: Text(p.name, style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              title: Text('${p.category} - ${p.name}', style: const TextStyle(fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
                               subtitle: Text('Current: ₵${p.retailPrice}', style: const TextStyle(fontSize: 10)),
                               value: selectedIds.contains(p.id),
                               onChanged: (val) {
@@ -522,7 +549,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     final customNameController = TextEditingController();
     final theme = Theme.of(context);
 
-    String selectedCategory = 'Beef';
+    String selectedCategory = 'Cow';
     String? selectedProductName;
     WeightUnit selectedUnit = WeightUnit.kg;
 
@@ -534,27 +561,29 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
         'Soft Whole Chicken', 'Hard Drumsticks', 'Soft Drumsticks',
         'Other'
       ],
-      'Beef': [
-        'Mixed Meat', 'Boneless', 'Offals / Yemadeɛ', 'Beef Steak', 
+      'Cow': [
+        'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Cow Steak', 
         'Liver & Lungs', 'Grounded Meat', 'Feet', 'Head', 'Tail / Padua',
         'Other'
       ],
-      'Goat': ['Mixed Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet', 'Other'],
+      'Goat': ['Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet', 'Other'],
+      'Sheep': ['Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet', 'Other'],
       'Pork': [
-        'Mixed Meat', 'Boneless Meat', 'Offals / Yemadeɛ', 'Pork Steak', 
+        'Standard Meat', 'Boneless Meat', 'Offals / Yemadeɛ', 'Pork Steak', 
         'Head', 'Ear', 'Feet', 'Liver', 'Skin',
         'Other'
       ],
-      'Lamb': ['Mixed Meat', 'Boneless', 'Chops', 'Other'],
+      'Turkey': ['Whole Turkey', 'Breast', 'Thighs', 'Drumsticks', 'Wings', 'Gizzards', 'Feet', 'Other'],
+      'Rabbit': ['Whole Rabbit', 'Legs', 'Saddle', 'Shoulders', 'Other'],
+      'Lamb': ['Standard Meat', 'Boneless', 'Chops', 'Other'],
       'Other': ['Custom Entry']
     };
 
-    // Extract existing categories from products and merge with defaults
     final existingCategories = products.map((p) => p.category).toSet();
     final List<String> categories = categoryProductMap.keys.toList();
     for (var cat in existingCategories) {
       if (!categories.contains(cat)) {
-        categories.insert(categories.length - 1, cat); // Insert before 'Other'
+        categories.insert(categories.length - 1, cat);
       }
     }
 
@@ -567,6 +596,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
+          scrollable: true,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
           title: Container(
             padding: const EdgeInsets.all(AppSpacing.l),
@@ -586,198 +616,184 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
           contentPadding: const EdgeInsets.all(AppSpacing.l),
           content: Form(
             key: formKey,
-            child: SizedBox(
-              width: MediaQuery.of(context).size.width * 0.85,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 500),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                    Center(
-                      child: InkWell(
-                        onTap: () async {
-                          final picker = ImagePicker();
-                          final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-                          if (image != null) {
-                            final bytes = await image.readAsBytes();
-                            setState(() {
-                              imageBytes = bytes;
-                              imageName = image.name;
-                            });
-                          }
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: InkWell(
+                    onTap: () async {
+                      final picker = ImagePicker();
+                      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+                      if (image != null) {
+                        final bytes = await image.readAsBytes();
+                        setState(() {
+                          imageBytes = bytes;
+                          imageName = image.name;
+                        });
+                      }
+                    },
+                    child: Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(AppRadius.m),
+                        border: Border.all(color: theme.dividerColor),
+                      ),
+                      child: imageBytes != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(AppRadius.m),
+                              child: Image.memory(imageBytes!, fit: BoxFit.cover),
+                            )
+                          : Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.add_a_photo_outlined, color: theme.colorScheme.onSurfaceVariant),
+                                const SizedBox(height: 4),
+                                Text('Add Image', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
+                              ],
+                            ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.l),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedCategory,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                  items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                  onChanged: (v) => setState(() {
+                    selectedCategory = v!;
+                    selectedProductName = null;
+                    nameController.clear();
+                  }),
+                ),
+                if (selectedCategory == 'Other') ...[
+                  const SizedBox(height: AppSpacing.m),
+                  _buildFormTextField(
+                    context: context,
+                    controller: otherCategoryController,
+                    label: 'Custom Category Name',
+                    hint: 'e.g. Rabbit',
+                    icon: Icons.edit_note,
+                    isName: true,
+                    validator: (v) => (selectedCategory == 'Other' && (v == null || v.isEmpty)) ? 'Required' : null,
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.m),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedProductName,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Product Name'),
+                  items: (categoryProductMap[selectedCategory] ?? (products.where((p) => p.category == selectedCategory).map((p) => p.name).toSet().toList()..add('Other'))).map((name) {
+                    return DropdownMenuItem(value: name, child: Text(name));
+                  }).toList(),
+                  onChanged: (v) => setState(() {
+                    selectedProductName = v;
+                    if (v != 'Other' && v != 'Custom Entry') {
+                      nameController.text = v!;
+                    } else {
+                      nameController.clear();
+                    }
+                  }),
+                  validator: (v) => (v == null) ? 'Required' : null,
+                ),
+                if (selectedProductName == 'Other' || selectedProductName == 'Custom Entry') ...[
+                  const SizedBox(height: AppSpacing.m),
+                  _buildFormTextField(
+                    context: context,
+                    controller: customNameController,
+                    label: 'Custom Product Name',
+                    hint: 'e.g. Sirloin Steak',
+                    icon: Icons.edit_note,
+                    isName: true,
+                    onChanged: (v) => nameController.text = v,
+                    validator: (v) => ((selectedProductName == 'Other' || selectedProductName == 'Custom Entry') && (v == null || v.isEmpty)) ? 'Required' : null,
+                  ),
+                ],
+                const SizedBox(height: AppSpacing.m),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildFormTextField(
+                        context: context,
+                        controller: retailPriceController,
+                        label: 'Retail',
+                        prefix: '₵ ',
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Required';
+                          if (double.tryParse(v) == null) return 'Invalid price';
+                          return null;
                         },
-                        child: Container(
-                          width: 100,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(AppRadius.m),
-                            border: Border.all(color: theme.dividerColor),
-                          ),
-                          child: imageBytes != null
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(AppRadius.m),
-                                  child: Image.memory(imageBytes!, fit: BoxFit.cover),
-                                )
-                              : Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.add_a_photo_outlined, color: theme.colorScheme.onSurfaceVariant),
-                                    const SizedBox(height: 4),
-                                    Text('Add Image', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
-                                  ],
-                                ),
-                        ),
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.l),
-
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedCategory,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Category'),
-                      items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                      onChanged: (v) => setState(() {
-                        selectedCategory = v!;
-                        selectedProductName = null;
-                        nameController.clear();
-                      }),
-                    ),
-
-                    if (selectedCategory == 'Other') ...[
-                      const SizedBox(height: AppSpacing.m),
-                      _buildFormTextField(
+                    const SizedBox(width: AppSpacing.s),
+                    Expanded(
+                      child: _buildFormTextField(
                         context: context,
-                        controller: otherCategoryController,
-                        label: 'Custom Category Name',
-                        hint: 'e.g. Rabbit',
-                        icon: Icons.edit_note,
-                        isName: true,
-                        validator: (v) => (selectedCategory == 'Other' && (v == null || v.isEmpty)) ? 'Required' : null,
+                        controller: wholesalePriceController,
+                        label: 'Wholesale',
+                        prefix: '₵ ',
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Required';
+                          if (double.tryParse(v) == null) return 'Invalid price';
+                          return null;
+                        },
                       ),
-                    ],
-
-                    const SizedBox(height: AppSpacing.m),
-
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedProductName,
-                      isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Product Name'),
-                      items: (categoryProductMap[selectedCategory] ?? (products.where((p) => p.category == selectedCategory).map((p) => p.name).toSet().toList()..add('Other'))).map((name) {
-                        return DropdownMenuItem(value: name, child: Text(name));
-                      }).toList(),
-                      onChanged: (v) => setState(() {
-                        selectedProductName = v;
-                        if (v != 'Other' && v != 'Custom Entry') {
-                          nameController.text = v!;
-                        } else {
-                          nameController.clear();
-                        }
-                      }),
-                      validator: (v) => (v == null) ? 'Required' : null,
                     ),
-
-                    if (selectedProductName == 'Other' || selectedProductName == 'Custom Entry') ...[
-                      const SizedBox(height: AppSpacing.m),
-                      _buildFormTextField(
+                    const SizedBox(width: AppSpacing.s),
+                    Expanded(
+                      child: _buildFormTextField(
                         context: context,
-                        controller: customNameController,
-                        label: 'Custom Product Name',
-                        hint: 'e.g. Sirloin Steak',
-                        icon: Icons.edit_note,
-                        isName: true,
-                        onChanged: (v) => nameController.text = v,
-                        validator: (v) => ((selectedProductName == 'Other' || selectedProductName == 'Custom Entry') && (v == null || v.isEmpty)) ? 'Required' : null,
+                        controller: costPriceController,
+                        label: 'Cost',
+                        prefix: '₵ ',
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Required';
+                          if (double.tryParse(v) == null) return 'Invalid price';
+                          return null;
+                        },
                       ),
-                    ],
-
-                    const SizedBox(height: AppSpacing.m),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildFormTextField(
-                            context: context,
-                            controller: retailPriceController,
-                            label: 'Retail',
-                            prefix: '₵ ',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              if (double.tryParse(v) == null) return 'Invalid price';
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.s),
-                        Expanded(
-                          child: _buildFormTextField(
-                            context: context,
-                            controller: wholesalePriceController,
-                            label: 'Wholesale',
-                            prefix: '₵ ',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              if (double.tryParse(v) == null) return 'Invalid price';
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.s),
-                        Expanded(
-                          child: _buildFormTextField(
-                            context: context,
-                            controller: costPriceController,
-                            label: 'Cost',
-                            prefix: '₵ ',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              if (double.tryParse(v) == null) return 'Invalid price';
-                              return null;
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.m),
-                    Row(
-                      children: [
-                        Expanded(
-                          flex: 2,
-                          child: _buildFormTextField(
-                            context: context,
-                            controller: stockController,
-                            label: 'Initial Stock',
-                            suffix: selectedUnit.name,
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              if (double.tryParse(v) == null) return 'Invalid qty';
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: AppSpacing.s),
-                        Expanded(
-                          child: DropdownButtonFormField<WeightUnit>(
-                            initialValue: selectedUnit,
-                            isExpanded: true,
-                            decoration: const InputDecoration(labelText: 'Unit'),
-                            items: WeightUnit.values.map((u) => DropdownMenuItem(value: u, child: Text(u == WeightUnit.unit ? 'PCS' : u.name.toUpperCase()))).toList(),
-                            onChanged: (v) => setState(() => selectedUnit = v!),
-                          ),
-                        ),
-                      ],
                     ),
                   ],
                 ),
-              ),
+                const SizedBox(height: AppSpacing.m),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: _buildFormTextField(
+                        context: context,
+                        controller: stockController,
+                        label: 'Initial Stock',
+                        suffix: selectedUnit.name,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        validator: (v) {
+                          if (v == null || v.isEmpty) return 'Required';
+                          if (double.tryParse(v) == null) return 'Invalid qty';
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.s),
+                    Expanded(
+                      child: DropdownButtonFormField<WeightUnit>(
+                        initialValue: selectedUnit,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Unit'),
+                        items: WeightUnit.values.map((u) => DropdownMenuItem(value: u, child: Text(u == WeightUnit.unit ? 'PCS' : u.name.toUpperCase()))).toList(),
+                        onChanged: (v) => setState(() => selectedUnit = v!),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-        ),
-        actions: [
+          actions: [
             TextButton(
               onPressed: isUploading ? null : () => Navigator.pop(context),
               child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
@@ -800,9 +816,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                     }
                   }
 
-                  final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-                  final String suffix = timestamp.substring(timestamp.length - 12);
-                  final String validUuid = '00000000-0000-0000-0000-$suffix';
+                  final String validUuid = UuidUtils.generate();
 
                   final newProduct = Product(
                     id: validUuid,
@@ -858,131 +872,127 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
+          scrollable: true,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
           title: Text('Edit Product: ${product.name}'),
           content: Form(
             key: formKey,
-            child: SizedBox(
-              width: MediaQuery.of(context).size.width * 0.85,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 500),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                    Center(
-                      child: InkWell(
-                        onTap: () async {
-                          final picker = ImagePicker();
-                          final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-                          if (image != null) {
-                            final bytes = await image.readAsBytes();
-                            setState(() {
-                              imageBytes = bytes;
-                              imageName = image.name;
-                            });
-                          }
-                        },
-                        child: Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(AppRadius.m),
-                            border: Border.all(color: theme.dividerColor),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(AppRadius.m),
-                            child: imageBytes != null
-                                ? Image.memory(imageBytes!, fit: BoxFit.cover)
-                                : (product.imageUrl.startsWith('http')
-                                    ? Image.network(product.imageUrl, fit: BoxFit.cover)
-                                    : Image.asset(product.imageUrl, fit: BoxFit.cover)),
-                          ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 500),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Center(
+                    child: InkWell(
+                      onTap: () async {
+                        final picker = ImagePicker();
+                        final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+                        if (image != null) {
+                          final bytes = await image.readAsBytes();
+                          setState(() {
+                            imageBytes = bytes;
+                            imageName = image.name;
+                          });
+                        }
+                      },
+                      child: Container(
+                        width: 120,
+                        height: 120,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(AppRadius.m),
+                          border: Border.all(color: theme.dividerColor),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(AppRadius.m),
+                          child: imageBytes != null
+                              ? Image.memory(imageBytes!, fit: BoxFit.cover)
+                              : (product.imageUrl.startsWith('http')
+                                  ? Image.network(product.imageUrl, fit: BoxFit.cover)
+                                  : Image.asset(product.imageUrl, fit: BoxFit.cover)),
                         ),
                       ),
                     ),
-                    const SizedBox(height: AppSpacing.l),
+                  ),
+                  const SizedBox(height: AppSpacing.l),
+                  _buildFormTextField(
+                    context: context,
+                    controller: nameController, 
+                    label: 'Product Name',
+                    isName: true,
+                    validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedCategory,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                    onChanged: (v) => setState(() => selectedCategory = v!),
+                  ),
+                  if (selectedCategory == 'Other') ...[
+                    const SizedBox(height: 16),
                     _buildFormTextField(
                       context: context,
-                      controller: nameController, 
-                      label: 'Product Name',
+                      controller: otherCategoryController,
+                      label: 'Custom Category Name',
                       isName: true,
-                      validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedCategory,
-                      decoration: const InputDecoration(labelText: 'Category'),
-                      items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                      onChanged: (v) => setState(() => selectedCategory = v!),
-                    ),
-                    if (selectedCategory == 'Other') ...[
-                      const SizedBox(height: 16),
-                      _buildFormTextField(
-                        context: context,
-                        controller: otherCategoryController,
-                        label: 'Custom Category Name',
-                        isName: true,
-                        validator: (v) => (selectedCategory == 'Other' && (v == null || v.isEmpty)) ? 'Required' : null,
-                      ),
-                    ],
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _buildFormTextField(
-                            context: context,
-                            controller: retailPriceController, 
-                            label: 'Retail Price', 
-                            prefix: '₵ ',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              if (double.tryParse(v) == null) return 'Invalid price';
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _buildFormTextField(
-                            context: context,
-                            controller: wholesalePriceController, 
-                            label: 'Wholesale Price', 
-                            prefix: '₵ ',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              if (double.tryParse(v) == null) return 'Invalid price';
-                              return null;
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: _buildFormTextField(
-                            context: context,
-                            controller: costPriceController, 
-                            label: 'Cost Price', 
-                            prefix: '₵ ',
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                            validator: (v) {
-                              if (v == null || v.isEmpty) return 'Required';
-                              if (double.tryParse(v) == null) return 'Invalid price';
-                              return null;
-                            },
-                          ),
-                        ),
-                      ],
+                      validator: (v) => (selectedCategory == 'Other' && (v == null || v.isEmpty)) ? 'Required' : null,
                     ),
                   ],
-                ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildFormTextField(
+                          context: context,
+                          controller: retailPriceController, 
+                          label: 'Retail Price', 
+                          prefix: '₵ ',
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Required';
+                            if (double.tryParse(v) == null) return 'Invalid price';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildFormTextField(
+                          context: context,
+                          controller: wholesalePriceController, 
+                          label: 'Wholesale Price', 
+                          prefix: '₵ ',
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Required';
+                            if (double.tryParse(v) == null) return 'Invalid price';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _buildFormTextField(
+                          context: context,
+                          controller: costPriceController, 
+                          label: 'Cost Price', 
+                          prefix: '₵ ',
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Required';
+                            if (double.tryParse(v) == null) return 'Invalid price';
+                            return null;
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
           ),
-        ),
-        actions: [
+          actions: [
             TextButton(
               onPressed: isUploading ? null : () => Navigator.pop(context), 
               child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant))
@@ -1080,6 +1090,8 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
           final product = products[index];
           final isLowStock = product.stockQuantity <= product.lowStockThreshold;
           final hasPromo = product.isPromoScheduled;
+          final pendingWeight = ref.watch(productPendingWeightProvider(product.name));
+          final hasIncoming = pendingWeight > 0;
 
           return Card(
             clipBehavior: Clip.antiAlias,
@@ -1121,7 +1133,19 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                   if (isAdmin) _buildItemMenu(context, ref, product),
                                 ],
                               ),
-                              Text(product.category, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11)),
+                              Row(
+                                children: [
+                                  Text(product.category, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11)),
+                                  if (hasIncoming) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                      decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
+                                      child: Text('IN TRANSIT', style: TextStyle(color: Colors.blue.shade700, fontSize: 8, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ],
+                              ),
                               const Spacer(),
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1159,7 +1183,13 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                         child: Text('${product.stockQuantity}${product.unit}', 
                                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isLowStock ? Colors.red : Colors.green)),
                                       ),
-                                      if (product.dailyStockAdded > 0 && 
+                                      if (hasIncoming)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 2),
+                                          child: Text('+${pendingWeight.toStringAsFixed(1)}${product.unit} coming', 
+                                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.blue.shade700)),
+                                        )
+                                      else if (product.dailyStockAdded > 0 && 
                                           product.lastStockUpdate != null && 
                                           product.lastStockUpdate!.year == DateTime.now().year &&
                                           product.lastStockUpdate!.month == DateTime.now().month &&
@@ -1201,9 +1231,29 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                 child: const Text('LOW STOCK', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                               ),
                             ),
-                          if (hasPromo)
+                          if (hasIncoming)
                             Positioned(
                               top: 8,
+                              left: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(color: Colors.blue.shade700, borderRadius: BorderRadius.circular(4)),
+                                child: const Text('IN TRANSIT', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          if (product.retailPrice <= 0)
+                            Positioned(
+                              top: hasIncoming ? 32 : 8,
+                              left: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(color: Colors.purple, borderRadius: BorderRadius.circular(4)),
+                                child: const Text('PRICING REQ', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          if (hasPromo)
+                            Positioned(
+                              top: (product.retailPrice <= 0 && hasIncoming) ? 56 : (product.retailPrice <= 0 || hasIncoming ? 32 : 8),
                               left: 8,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1224,14 +1274,23 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            product.category.toUpperCase(),
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                            ),
+                          Row(
+                            children: [
+                              Text(
+                                product.category.toUpperCase(),
+                                style: TextStyle(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              if (hasIncoming) ...[
+                                const SizedBox(width: 8),
+                                Text('+${pendingWeight.toStringAsFixed(1)}${product.unit} IN TRANSIT', 
+                                  style: TextStyle(color: Colors.blue.shade700, fontSize: 8, fontWeight: FontWeight.bold)),
+                              ],
+                            ],
                           ),
                           const SizedBox(height: 2),
                           Row(
@@ -1282,7 +1341,10 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                 children: [
                                   Text('${product.stockQuantity}${product.unit}', 
                                     style: TextStyle(fontWeight: FontWeight.bold, color: isLowStock ? Colors.red : Colors.green)),
-                                  if (product.dailyStockAdded > 0 && 
+                                  if (hasIncoming)
+                                    Text('+${pendingWeight.toStringAsFixed(1)}${product.unit} coming', 
+                                      style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.blue.shade700))
+                                  else if (product.dailyStockAdded > 0 &&
                                       product.lastStockUpdate != null && 
                                       product.lastStockUpdate!.year == DateTime.now().year &&
                                       product.lastStockUpdate!.month == DateTime.now().month &&
@@ -1387,6 +1449,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
         title: Row(
           children: [
@@ -1400,63 +1463,61 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             ),
           ],
         ),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: SingleChildScrollView(
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.m),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(AppRadius.s),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.inventory_2, color: theme.colorScheme.primary),
-                        const SizedBox(width: AppSpacing.m),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Current Inventory', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: Text('${product.stockQuantity} ${product.unit}', 
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: theme.colorScheme.primary)),
-                              ),
-                            ],
-                          ),
+        content: Form(
+          key: formKey,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.m),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(AppRadius.s),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.inventory_2, color: theme.colorScheme.primary),
+                      const SizedBox(width: AppSpacing.m),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Current Inventory', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
+                            FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text('${product.stockQuantity} ${product.unit}', 
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: theme.colorScheme.primary)),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: AppSpacing.l),
-                  TextFormField(
-                    controller: stockController,
-                    decoration: InputDecoration(
-                      labelText: 'Add/Remove Quantity',
-                      hintText: 'e.g. 50.0 or -10.5',
-                      helperText: 'Use negative value to reduce stock',
-                      suffixText: product.unit,
-                      border: const OutlineInputBorder(),
-                    ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]'))],
-                    autofocus: true,
-                    validator: (v) {
-                      if (v == null || v.isEmpty) return 'Required';
-                      if (double.tryParse(v) == null) return 'Invalid quantity';
-                      return null;
-                    },
+                ),
+                const SizedBox(height: AppSpacing.l),
+                TextFormField(
+                  controller: stockController,
+                  decoration: InputDecoration(
+                    labelText: 'Add/Remove Quantity',
+                    hintText: 'e.g. 50.0 or -10.5',
+                    helperText: 'Use negative value to reduce stock',
+                    suffixText: product.unit,
+                    border: const OutlineInputBorder(),
                   ),
-                ],
-              ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]'))],
+                  autofocus: true,
+                  validator: (v) {
+                    if (v == null || v.isEmpty) return 'Required';
+                    if (double.tryParse(v) == null) return 'Invalid quantity';
+                    return null;
+                  },
+                ),
+              ],
             ),
           ),
         ),

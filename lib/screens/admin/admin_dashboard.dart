@@ -711,8 +711,8 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
   }
 
   void _handleQuickAddStaff(BuildContext context) {
-    // Navigate to user management and use the callback to open dialog
-    Navigator.pushReplacementNamed(context, '/admin/users');
+    // Navigate to staff management and use the callback to open dialog
+    Navigator.pushReplacementNamed(context, '/admin/staff');
     // Note: In a real app, we might pass a flag in arguments to auto-open the dialog
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Opening Staff Registration...'), duration: Duration(seconds: 1)),
@@ -950,7 +950,9 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
           padding: const EdgeInsets.only(bottom: 8.0),
           child: Row(
             children: [
-              Text('MONTHLY PERFORMANCE', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2)),
+              Flexible(
+                child: Text('MONTHLY PERFORMANCE', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.2), overflow: TextOverflow.ellipsis),
+              ),
               const SizedBox(width: 8),
               Text('(${DateFormat('MMMM').format(now).toUpperCase()})', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 10)),
             ],
@@ -996,7 +998,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
     final bool isPositive = trend.startsWith('+') || trend == 'SAVED' || trend == 'LIVE';
 
     return Container(
-      padding: EdgeInsets.all(isMobile ? AppSpacing.s : AppSpacing.m),
+      padding: EdgeInsets.all(isMobile ? 4 : AppSpacing.m),
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(AppRadius.m),
@@ -1006,29 +1008,30 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
         border: isDark ? Border.all(color: theme.dividerColor) : null,
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: EdgeInsets.all(isMobile ? 6 : 10),
+            padding: EdgeInsets.all(isMobile ? 4 : 10),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.1), 
               borderRadius: BorderRadius.circular(AppRadius.s)
             ),
-            child: Icon(icon, color: color, size: isMobile ? 18 : 22),
+            child: Icon(icon, color: color, size: isMobile ? 14 : 22),
           ),
-          const SizedBox(width: AppSpacing.s),
+          SizedBox(width: isMobile ? 4 : AppSpacing.s),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: isMobile ? 9 : 10, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
+                Text(title, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: isMobile ? 8 : 10, fontWeight: FontWeight.w500), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 1),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerLeft,
-                  child: Text(value, style: TextStyle(fontSize: isMobile ? 14 : 16, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
+                  child: Text(value, style: TextStyle(fontSize: isMobile ? 12 : 16, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 1),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                   decoration: BoxDecoration(
@@ -1039,7 +1042,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
                     trend,
                     style: TextStyle(
                       color: isPositive ? Colors.green : Colors.red,
-                      fontSize: isMobile ? 7 : 8,
+                      fontSize: isMobile ? 6 : 8,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -1462,8 +1465,10 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
             children: [
               const Icon(Icons.notification_important, color: Colors.red, size: 20),
               const SizedBox(width: 8),
-              Text('System Alerts', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface)),
-              const Spacer(),
+              Expanded(
+                child: Text('System Alerts', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface), overflow: TextOverflow.ellipsis),
+              ),
+              const SizedBox(width: 8),
               if (lowStockItems.length + pendingCorrections.length + unreadButcherReports.length + pendingSalaries.length > 0)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

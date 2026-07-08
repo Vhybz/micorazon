@@ -11,6 +11,7 @@ class ProductCard extends StatelessWidget {
   final String? unit;
   final String imageUrl;
   final String? promoLabel;
+  final bool isInTransit;
   final VoidCallback onTap;
 
   const ProductCard({
@@ -23,6 +24,7 @@ class ProductCard extends StatelessWidget {
     this.lowStockThreshold,
     this.unit,
     this.promoLabel,
+    this.isInTransit = false,
     required this.imageUrl,
     required this.onTap,
   });
@@ -108,7 +110,8 @@ class ProductCard extends StatelessWidget {
                         ),
                         child: Text(
                           promoLabel!,
-                          style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                          style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
                         ),
                       ),
                     ),
@@ -125,6 +128,31 @@ class ProductCard extends StatelessWidget {
                         child: Text(
                           '${stockQuantity!.toStringAsFixed(1)}${unit ?? "kg"}',
                           style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  if (isInTransit)
+                    Container(
+                      color: Colors.black.withValues(alpha: 0.4),
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade700,
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 4)],
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.local_shipping, color: Colors.white, size: 14),
+                              SizedBox(width: 6),
+                              Text(
+                                'IN TRANSIT',
+                                style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),

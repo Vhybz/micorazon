@@ -282,10 +282,10 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> with SingleTi
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Weight', style: TextStyle(fontSize: 8, color: AppColors.textLight)),
+                      const Text('Weight/Qty', style: TextStyle(fontSize: 8, color: AppColors.textLight)),
                       FittedBox(
                         fit: BoxFit.scaleDown,
-                        child: Text('${cut.weight.toStringAsFixed(1)} kg', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        child: Text('${cut.weight.toStringAsFixed(cut.unit == 'Qty' ? 0 : 1)} ${cut.unit}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       ),
                     ],
                   ),

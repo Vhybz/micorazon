@@ -257,7 +257,7 @@ class AboutScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                user.name,
+                'Clifford Kyeremeh',
                 style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold, letterSpacing: -1),
               ),
               const Text(
@@ -300,7 +300,7 @@ class AboutScreen extends ConsumerWidget {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(AppRadius.m - 4),
                 child: Image.asset(
-                  'assets/images/img.png',
+                  'assets/images/CLI.png',
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) {
                     return Container(

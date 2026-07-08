@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/uuid_utils.dart';
 import '../models/system_models.dart';
 import 'offline_sync_service.dart';
 import 'user_provider.dart';
@@ -14,7 +15,7 @@ class AuditService {
   }) async {
     final user = ref.read(currentUserProvider);
     final log = AuditLog(
-      id: '00000000-0000-0000-0000-${DateTime.now().millisecondsSinceEpoch}',
+      id: UuidUtils.generate(),
       branchCode: user?.branchCode,
       userId: user?.id,
       userName: user?.name,

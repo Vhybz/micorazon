@@ -7,6 +7,7 @@ class Customer {
   final bool isFavorite;
   final double loyaltyPoints;
   final int visitCount;
+  final bool isDeleted;
 
   Customer({
     required this.id,
@@ -17,6 +18,7 @@ class Customer {
     this.isFavorite = false,
     this.loyaltyPoints = 0.0,
     this.visitCount = 0,
+    this.isDeleted = false,
   });
 
   Customer copyWith({
@@ -28,6 +30,7 @@ class Customer {
     bool? isFavorite,
     double? loyaltyPoints,
     int? visitCount,
+    bool? isDeleted,
   }) {
     return Customer(
       id: id ?? this.id,
@@ -38,19 +41,22 @@ class Customer {
       isFavorite: isFavorite ?? this.isFavorite,
       loyaltyPoints: loyaltyPoints ?? this.loyaltyPoints,
       visitCount: visitCount ?? this.visitCount,
+      isDeleted: isDeleted ?? this.isDeleted,
     );
   }
 
-  factory Customer.fromJson(Map<String, dynamic> json) {
+  factory Customer.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return Customer(
-      id: json['id'],
-      branchCode: json['branch_code'],
-      name: json['name'],
-      phone: json['phone'],
-      location: json['location'],
-      isFavorite: json['is_favorite'] ?? false,
-      loyaltyPoints: (json['loyalty_points'] as num? ?? 0.0).toDouble(),
-      visitCount: json['visit_count'] ?? 0,
+      id: map['id'],
+      branchCode: map['branch_code'],
+      name: map['name'],
+      phone: map['phone'],
+      location: map['location'],
+      isFavorite: map['is_favorite'] ?? false,
+      loyaltyPoints: (map['loyalty_points'] as num? ?? 0.0).toDouble(),
+      visitCount: map['visit_count'] ?? 0,
+      isDeleted: map['is_deleted'] ?? false,
     );
   }
 
@@ -64,6 +70,7 @@ class Customer {
       'is_favorite': isFavorite,
       'loyalty_points': loyaltyPoints,
       'visit_count': visitCount,
+      'is_deleted': isDeleted,
     };
   }
 }

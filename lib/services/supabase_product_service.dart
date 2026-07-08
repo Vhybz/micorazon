@@ -5,7 +5,7 @@ import 'product_service.dart';
 import '../core/supabase_config.dart';
 
 class SupabaseProductService implements ProductService {
-  final _client = SupabaseConfig.client;
+  SupabaseClient get _client => SupabaseConfig.client;
 
   @override
   Future<List<Product>> getProducts(String branchCode) async {
@@ -52,10 +52,19 @@ class SupabaseProductService implements ProductService {
 
   @override
   Future<void> updateStock(String id, double newQuantity) async {
+    // This is still useful for absolute overrides (Admin editing stock)
     await _client
         .from('products')
         .update({'stock_quantity': newQuantity})
         .eq('id', id);
+  }
+
+  // Add an atomic increment method using the RPC defined in SUPABASE_SETUP.md
+  Future<void> incrementStock(String id, double amount) async {
+    await _client.rpc('increment_stock', params: {
+      'p_id': id,
+      'p_amount': amount,
+    });
   }
 
   @override

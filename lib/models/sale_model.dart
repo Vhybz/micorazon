@@ -15,11 +15,12 @@ class PaymentDetail {
     this.reference,
   });
 
-  factory PaymentDetail.fromJson(Map<String, dynamic> json) {
+  factory PaymentDetail.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return PaymentDetail(
-      method: PaymentMethod.values.byName(json['method']),
-      amount: (json['amount'] as num).toDouble(),
-      reference: json['reference'],
+      method: PaymentMethod.values.byName(map['method']),
+      amount: (map['amount'] as num).toDouble(),
+      reference: map['reference'],
     );
   }
 
@@ -43,12 +44,13 @@ class SaleItem {
     required this.originalPrice,
   });
 
-  factory SaleItem.fromJson(Map<String, dynamic> json) {
+  factory SaleItem.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return SaleItem(
-      product: Product.fromJson(json['product']),
-      quantity: (json['quantity'] as num).toDouble(),
-      priceAtSale: (json['price_at_sale'] as num).toDouble(),
-      originalPrice: (json['original_price'] as num? ?? (json['price_at_sale'] as num)).toDouble(),
+      product: Product.fromJson(map['product']),
+      quantity: (map['quantity'] as num).toDouble(),
+      priceAtSale: (map['price_at_sale'] as num).toDouble(),
+      originalPrice: (map['original_price'] as num? ?? (map['price_at_sale'] as num)).toDouble(),
     );
   }
 
@@ -104,26 +106,27 @@ class SaleRecord {
     this.isVerified = false,
   });
 
-  factory SaleRecord.fromJson(Map<String, dynamic> json) {
+  factory SaleRecord.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return SaleRecord(
-      id: json['id'],
-      branchCode: json['branch_code'],
-      items: (json['items'] as List).map((e) => SaleItem.fromJson(e)).toList(),
-      totalAmount: (json['total_amount'] as num).toDouble(),
-      totalDiscount: (json['total_discount'] as num? ?? 0.0).toDouble(),
-      totalCost: (json['total_cost'] as num? ?? 0.0).toDouble(),
-      appliedPromo: json['applied_promo'],
-      payments: (json['payments'] as List).map((e) => PaymentDetail.fromJson(e)).toList(),
-      timestamp: DateTime.parse(json['timestamp']),
-      cashierName: json['cashier_name'],
-      cashierId: json['cashier_id'],
-      customerName: json['customer_name'],
-      customerPhone: json['customer_phone'],
-      status: SaleStatus.values.byName(json['status'] ?? 'completed'),
-      correctionReason: json['correction_reason'],
-      bankReceiptUrl: json['bank_receipt_url'],
-      bankReceiptId: json['bank_receipt_id'],
-      isVerified: json['is_verified'] ?? false,
+      id: map['id'],
+      branchCode: map['branch_code'],
+      items: (map['items'] as List).map((e) => SaleItem.fromJson(e)).toList(),
+      totalAmount: (map['total_amount'] as num).toDouble(),
+      totalDiscount: (map['total_discount'] as num? ?? 0.0).toDouble(),
+      totalCost: (map['total_cost'] as num? ?? 0.0).toDouble(),
+      appliedPromo: map['applied_promo'],
+      payments: (map['payments'] as List).map((e) => PaymentDetail.fromJson(e)).toList(),
+      timestamp: DateTime.parse(map['timestamp']),
+      cashierName: map['cashier_name'],
+      cashierId: map['cashier_id'],
+      customerName: map['customer_name'],
+      customerPhone: map['customer_phone'],
+      status: SaleStatus.values.byName(map['status'] ?? 'completed'),
+      correctionReason: map['correction_reason'],
+      bankReceiptUrl: map['bank_receipt_url'],
+      bankReceiptId: map['bank_receipt_id'],
+      isVerified: map['is_verified'] ?? false,
     );
   }
 

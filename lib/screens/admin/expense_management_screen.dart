@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
+import '../../core/uuid_utils.dart';
 import '../../widgets/main_app_bar.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/app_sidebar.dart';
@@ -332,9 +333,7 @@ class ExpenseManagementScreen extends ConsumerWidget {
                       receiptUrl = await ref.read(expenseProvider.notifier).uploadReceipt(localReceiptBytes!, fileName);
                     }
 
-                    final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-                    final String suffix = timestamp.substring(timestamp.length - 12);
-                    final String validUuid = '00000000-0000-0000-0000-$suffix';
+                    final String validUuid = UuidUtils.generate();
 
                     final newExp = ExpenseRecord(
                       id: validUuid,

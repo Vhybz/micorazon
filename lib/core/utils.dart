@@ -1,20 +1,24 @@
 enum WeightUnit { kg, lb, unit }
 
 class WeightConverter {
-  static const double kgToLb = 2.20462;
+  static double toKg(double lbs) => lbs * 0.453592;
+  static double toLbs(double kgs) => kgs * 2.20462;
+  static double toLb(double kgs) => toLbs(kgs);
 
-  static double toLb(double kg) => kg * kgToLb;
-  static double toKg(double lb) => lb / kgToLb;
-
-  /// Returns a formatted string with both units: "X kg / Y lb"
-  static String format(double value, {WeightUnit unit = WeightUnit.kg}) {
-    if (unit == WeightUnit.unit) return "${value.toInt()} unit(s)";
-    return "${value.toStringAsFixed(2)} kg / ${toLb(value).toStringAsFixed(2)} lb";
+  static String formatShort(double weight) {
+    if (weight >= 1000) {
+      return '${(weight / 1000).toStringAsFixed(1)}t';
+    }
+    return '${weight.toStringAsFixed(1)}kg';
   }
+}
 
-  /// Returns only the values and units in a concise way
-  static String formatShort(double value, {WeightUnit unit = WeightUnit.kg}) {
-    if (unit == WeightUnit.unit) return "${value.toInt()} pcs";
-    return "${value.toStringAsFixed(1)}kg | ${toLb(value).toStringAsFixed(1)}lb";
+class IdGenerator {
+  static String generate({String prefix = 'ID'}) {
+    final now = DateTime.now();
+    final dateStr = '${now.year.toString().substring(2)}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+    final timeStr = '${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
+    final random = (100 + (now.microsecond % 900)).toString();
+    return '$prefix-$dateStr-$timeStr-$random';
   }
 }

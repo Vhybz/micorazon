@@ -14,7 +14,6 @@ import '../../services/birthday_service.dart';
 import 'butcher_dashboard.dart';
 import 'animal_intake_screen.dart';
 import 'slaughter_log_screen.dart';
-import 'batch_management_screen.dart';
 import 'meat_processing_screen.dart';
 import 'stock_transfer_screen.dart';
 import 'inventory_screen.dart';
@@ -27,6 +26,7 @@ import 'carcass_breakdown_screen.dart';
 import '../profile_screen.dart';
 import 'how_to_use_screen.dart';
 import 'butcher_expense_screen.dart';
+import 'batch_management_screen.dart';
 
 class ButcherShell extends ConsumerWidget {
   const ButcherShell({super.key});
@@ -109,7 +109,6 @@ class ButcherShell extends ConsumerWidget {
       case ButcherScreen.animalIntake: return 'Animal Intake';
       case ButcherScreen.slaughterLog: return 'Slaughter Logs';
       case ButcherScreen.meatProcessing: return 'Meat Processing';
-      case ButcherScreen.batchManagement: return 'Batch Management';
       case ButcherScreen.stockTransfer: return 'Stock Transfer';
       case ButcherScreen.inventory: return 'Butcher Inventory';
       case ButcherScreen.orders: return 'Processing Orders';
@@ -121,6 +120,7 @@ class ButcherShell extends ConsumerWidget {
       case ButcherScreen.profile: return 'Personal Profile';
       case ButcherScreen.howToUse: return 'How to Use System';
       case ButcherScreen.carcassBreakdown: return 'Carcass Breakdown Station';
+      case ButcherScreen.batchManagement: return 'Batch Management Hub';
     }
   }
 
@@ -150,22 +150,22 @@ class ButcherShell extends ConsumerWidget {
 
   Widget _buildContent(ButcherScreen screen) {
     switch (screen) {
-      case ButcherScreen.dashboard: return const ButcherDashboard();
-      case ButcherScreen.animalIntake: return const AnimalIntakeScreen();
-      case ButcherScreen.slaughterLog: return const SlaughterLogScreen();
-      case ButcherScreen.meatProcessing: return const MeatProcessingScreen();
-      case ButcherScreen.batchManagement: return const BatchManagementScreen();
-      case ButcherScreen.stockTransfer: return const StockTransferScreen();
-      case ButcherScreen.inventory: return const InventoryScreen();
-      case ButcherScreen.orders: return const OrdersScreen();
-      case ButcherScreen.wasteManagement: return const WasteManagementScreen();
-      case ButcherScreen.expenses: return const ButcherExpenseScreen();
-      case ButcherScreen.documents: return const DocumentsScreen(isNested: true);
-      case ButcherScreen.reports: return const ReportsScreen();
-      case ButcherScreen.settings: return const SettingsScreen();
-      case ButcherScreen.profile: return const ProfileView();
-      case ButcherScreen.howToUse: return const HowToUseScreen();
-      case ButcherScreen.carcassBreakdown: return const CarcassBreakdownScreen();
+      case ButcherScreen.dashboard: return ButcherDashboard();
+      case ButcherScreen.animalIntake: return AnimalIntakeScreen();
+      case ButcherScreen.slaughterLog: return SlaughterLogScreen();
+      case ButcherScreen.meatProcessing: return MeatProcessingScreen();
+      case ButcherScreen.stockTransfer: return StockTransferScreen();
+      case ButcherScreen.inventory: return InventoryScreen();
+      case ButcherScreen.orders: return OrdersScreen();
+      case ButcherScreen.wasteManagement: return WasteManagementScreen();
+      case ButcherScreen.expenses: return ButcherExpenseScreen();
+      case ButcherScreen.documents: return DocumentsScreen(isNested: true);
+      case ButcherScreen.reports: return ReportsScreen();
+      case ButcherScreen.settings: return SettingsScreen();
+      case ButcherScreen.profile: return ProfileView();
+      case ButcherScreen.howToUse: return HowToUseScreen();
+      case ButcherScreen.carcassBreakdown: return CarcassBreakdownScreen();
+      case ButcherScreen.batchManagement: return BatchManagementScreen();
     }
   }
 

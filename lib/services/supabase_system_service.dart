@@ -1,8 +1,10 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/system_models.dart';
 
+import '../core/supabase_config.dart';
+
 class SupabaseSystemService {
-  final _client = Supabase.instance.client;
+  SupabaseClient get _client => SupabaseConfig.client;
 
   Future<List<AuditLog>> getAuditLogs(String branchCode) async {
     final response = await _client

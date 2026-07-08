@@ -32,6 +32,7 @@ class UserAccount {
   final double? salaryAmount;
   final int? salaryDay; // Day of the month (1-31)
   final DateTime? lastSalaryDate;
+  final bool lastPaymentWasAdvance;
 
   // Theme preferences
   final String? themeMode; // 'light', 'dark', 'system'
@@ -64,46 +65,75 @@ class UserAccount {
     this.salaryAmount,
     this.salaryDay,
     this.lastSalaryDate,
+    this.lastPaymentWasAdvance = false,
     this.themeMode,
     this.themePrimaryColor,
   }) : createdAt = createdAt ?? DateTime.now();
 
   factory UserAccount.fromJson(Map<String, dynamic> json) {
+    UserRole safeRole(String? name) {
+      if (name == null) return UserRole.cashier;
+      try {
+        return UserRole.values.byName(name.trim());
+      } catch (_) {
+        final lower = name.toLowerCase();
+        if (lower.contains('super')) return UserRole.superAdmin;
+        if (lower.contains('admin')) return UserRole.admin;
+        if (lower.contains('butcher')) return UserRole.butcher;
+        return UserRole.cashier;
+      }
+    }
+
+    AccountStatus safeStatus(String? name) {
+      if (name == null) return AccountStatus.pending;
+      try {
+        return AccountStatus.values.byName(name.trim());
+      } catch (_) {
+        final lower = name.toLowerCase();
+        if (lower.contains('pend')) return AccountStatus.pending;
+        if (lower.contains('susp')) return AccountStatus.suspended;
+        return AccountStatus.approved;
+      }
+    }
+
+    DateTime? safeDate(dynamic val) {
+      if (val == null) return null;
+      if (val is DateTime) return val;
+      return DateTime.tryParse(val.toString());
+    }
+
     return UserAccount(
-      id: json['id'],
-      firstName: json['first_name'],
-      surname: json['surname'],
-      email: json['email'],
-      phone: json['phone'],
-      gender: json['gender'],
-      dob: json['dob'] != null ? DateTime.parse(json['dob']) : null,
-      photoUrl: json['photo_url'],
-      role: UserRole.values.byName(json['role']),
-      branchCode: json['branch_code'],
+      id: json['id']?.toString() ?? '',
+      firstName: json['first_name']?.toString() ?? 'Unknown',
+      surname: json['surname']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      phone: json['phone']?.toString(),
+      gender: json['gender']?.toString(),
+      dob: safeDate(json['dob']),
+      photoUrl: json['photo_url']?.toString(),
+      role: safeRole(json['role']?.toString()),
+      branchCode: json['branch_code']?.toString(),
       secondaryRoles: (json['secondary_roles'] as List? ?? [])
-          .map((e) => UserRole.values.byName(e))
+          .map((e) => safeRole(e?.toString()))
           .toList(),
-      shopLocation: json['shop_location'],
-      status: AccountStatus.values.byName(json['status']),
-      createdAt: DateTime.parse(json['created_at']),
-      isDeleted: json['is_deleted'] ?? false,
-      lastSeen: json['last_seen'] != null ? DateTime.parse(json['last_seen']) : null,
+      shopLocation: json['shop_location']?.toString(),
+      status: safeStatus(json['status']?.toString()),
+      createdAt: safeDate(json['created_at']) ?? DateTime.now(),
+      isDeleted: json['is_deleted'] == true,
+      lastSeen: safeDate(json['last_seen']),
       temporaryRole: json['temporary_role'] != null 
-          ? UserRole.values.byName(json['temporary_role']) 
+          ? safeRole(json['temporary_role']?.toString()) 
           : null,
-      tempRoleStart: json['temp_role_start'] != null 
-          ? DateTime.parse(json['temp_role_start']) 
-          : null,
-      tempRoleEnd: json['temp_role_end'] != null 
-          ? DateTime.parse(json['temp_role_end']) 
-          : null,
-      enabledPermissions: Set<String>.from(json['enabled_permissions'] ?? []),
-      newlyAddedPermissions: Set<String>.from(json['newly_added_permissions'] ?? []),
-      salaryAmount: json['salary_amount']?.toDouble(),
-      salaryDay: json['salary_day'],
-      lastSalaryDate: json['last_salary_date'] != null ? DateTime.parse(json['last_salary_date']) : null,
-      themeMode: json['theme_mode'],
-      themePrimaryColor: json['theme_primary_color'],
+      tempRoleStart: safeDate(json['temp_role_start']),
+      tempRoleEnd: safeDate(json['temp_role_end']),
+      enabledPermissions: Set<String>.from((json['enabled_permissions'] as List? ?? []).map((e) => e.toString())),
+      newlyAddedPermissions: Set<String>.from((json['newly_added_permissions'] as List? ?? []).map((e) => e.toString())),
+      salaryAmount: json['salary_amount'] != null ? double.tryParse(json['salary_amount'].toString()) : null,
+      salaryDay: json['salary_day'] != null ? int.tryParse(json['salary_day'].toString()) : null,
+      lastSalaryDate: safeDate(json['last_salary_date']),
+      lastPaymentWasAdvance: json['last_payment_was_advance'] == true,
+      themeMode: json['theme_mode']?.toString(),
+      themePrimaryColor: json['theme_primary_color'] != null ? int.tryParse(json['theme_primary_color'].toString()) : null,
     );
   }
 
@@ -132,7 +162,8 @@ class UserAccount {
       'newly_added_permissions': newlyAddedPermissions.toList(),
       'salary_amount': salaryAmount,
       'salary_day': salaryDay,
-      'last_salary_date': lastSalaryDate?.toIso8601String(),
+      'last_salary_date': lastSalaryDate != null ? "${lastSalaryDate!.year}-${lastSalaryDate!.month.toString().padLeft(2, '0')}-${lastSalaryDate!.day.toString().padLeft(2, '0')}" : null,
+      'last_payment_was_advance': lastPaymentWasAdvance,
       'theme_mode': themeMode,
       'theme_primary_color': themePrimaryColor,
     };
@@ -198,6 +229,7 @@ class UserAccount {
     double? salaryAmount,
     int? salaryDay,
     DateTime? lastSalaryDate,
+    bool? lastPaymentWasAdvance,
     String? themeMode,
     int? themePrimaryColor,
     bool clearPromotion = false,
@@ -227,6 +259,7 @@ class UserAccount {
       salaryAmount: salaryAmount ?? this.salaryAmount,
       salaryDay: salaryDay ?? this.salaryDay,
       lastSalaryDate: lastSalaryDate ?? this.lastSalaryDate,
+      lastPaymentWasAdvance: lastPaymentWasAdvance ?? this.lastPaymentWasAdvance,
       themeMode: themeMode ?? this.themeMode,
       themePrimaryColor: themePrimaryColor ?? this.themePrimaryColor,
     );

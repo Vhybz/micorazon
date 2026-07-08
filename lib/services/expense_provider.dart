@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/expense_model.dart';
 import 'supabase_expense_service.dart';
 import 'user_provider.dart';
@@ -22,41 +25,97 @@ class ExpenseState {
 class ExpenseNotifier extends StateNotifier<ExpenseState> {
   final SupabaseExpenseService _service;
   final Ref ref;
+  StreamSubscription? _subscription;
 
   ExpenseNotifier(this._service, this.ref) : super(ExpenseState(
     records: [],
     categories: ['Electricity', 'GRA Tax', 'Water', 'Rent', 'Wages', 'Transport', 'Vet Check', 'Animal Transport', 'Maintenance', 'Bank Deposit'],
   )) {
-    loadExpenses();
+    _init();
+  }
+
+  void _init() {
+    _loadFromCache();
+    
+    // Watch current user and restart subscription if branch changes
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        _startSubscription();
+      }
+    });
+
+    _startSubscription();
+  }
+
+  void _loadFromCache() {
+    try {
+      final box = Hive.box(OfflineSyncService.expensesBoxName);
+      if (box.isNotEmpty) {
+        final List<ExpenseRecord> cached = box.values
+            .map((json) => ExpenseRecord.fromJson(Map<String, dynamic>.from(json)))
+            .toList();
+        state = state.copyWith(records: cached);
+        debugPrint('Expense Engine: ${cached.length} records loaded from local cache.');
+      }
+    } catch (e) {
+      debugPrint('Expense Engine Cache Error: $e');
+    }
+  }
+
+  void _saveToCache(List<ExpenseRecord> expenses) {
+    try {
+      final box = Hive.box(OfflineSyncService.expensesBoxName);
+      box.clear();
+      for (var e in expenses) {
+        box.put(e.id, e.toJson());
+      }
+    } catch (e) {
+      debugPrint('Expense Engine Save Error: $e');
+    }
+  }
+
+  void _startSubscription() {
+    final user = ref.read(currentUserProvider);
+    if (user?.branchCode == null) return;
+
+    _subscription?.cancel();
+    _subscription = _service.watchExpenses(user!.branchCode!).listen((expenses) {
+      state = state.copyWith(records: expenses);
+      _saveToCache(expenses);
+    }, onError: (e) {
+      debugPrint('Expense Stream Error: $e');
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 
   Future<void> loadExpenses() async {
-    try {
-      final user = ref.read(currentUserProvider);
-      if (user == null || user.branchCode == null) return;
-
-      final expenses = await _service.getExpenses(user.branchCode!);
-      if (state.records.length != expenses.length || state.records.toString() != expenses.toString()) {
-        state = state.copyWith(records: expenses);
-      }
-    } catch (_) {}
+    _startSubscription();
   }
 
   Future<void> addExpense(ExpenseRecord expense) async {
+    final user = ref.read(currentUserProvider);
+    final expenseWithBranch = expense.copyWith(branchCode: user?.branchCode);
+    
     try {
-      final user = ref.read(currentUserProvider);
-      final expenseWithBranch = expense.copyWith(branchCode: user?.branchCode);
-      
-      // 1. Add to Offline Queue (Hive)
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.addExpense(expenseWithBranch);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      // Fallback to Hive Queue
       await OfflineSyncService.addToQueue(
         actionType: 'EXPENSE', 
         data: expenseWithBranch.toJson(),
       );
-
-      // 2. Optimistic local update
+      // Optimistic local update
       state = state.copyWith(records: [expenseWithBranch, ...state.records]);
-    } catch (e) {
-      debugPrint('Error adding expense (Queue): $e');
     }
   }
 
@@ -66,8 +125,16 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
   Future<void> deleteExpense(String id) async {
     try {
-      await _service.deleteExpense(id);
-      state = state.copyWith(records: state.records.where((e) => e.id != id).toList());
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.deleteExpense(id);
+      } else {
+        await OfflineSyncService.addToQueue(
+          actionType: 'DELETE_EXPENSE',
+          data: {'id': id},
+        );
+        state = state.copyWith(records: state.records.where((e) => e.id != id).toList());
+      }
     } catch (_) {}
   }
 

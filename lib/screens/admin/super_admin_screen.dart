@@ -18,8 +18,7 @@ class SuperAdminScreen extends ConsumerWidget {
     final productsAsync = ref.watch(productsFutureProvider);
     final isMobile = ResponsiveLayout.isMobile(context);
     
-    final deletedUsers = users.where((u) => u.isDeleted).toList();
-    final pendingUsers = users.where((u) => !u.isDeleted && u.status == AccountStatus.pending).toList();
+    final pendingUsers = users.where((u) => u.status == AccountStatus.pending).toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0B), // Cyber/Dark theme for Super Admin
@@ -52,8 +51,6 @@ class SuperAdminScreen extends ConsumerWidget {
               direction: isMobile ? Axis.vertical : Axis.horizontal,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(flex: isMobile ? 0 : 1, child: _buildDeletedUsersList(context, ref, deletedUsers)),
-                if (isMobile) const SizedBox(height: AppSpacing.l) else const SizedBox(width: AppSpacing.l),
                 Expanded(
                   flex: isMobile ? 0 : 1,
                   child: productsAsync.when(
@@ -116,44 +113,10 @@ class SuperAdminScreen extends ConsumerWidget {
                   child: const Text('Approve'),
                 ),
                 const SizedBox(width: 8),
-                IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: () => ref.read(userProvider.notifier).permanentlyDeleteUser(user.id)),
+                IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: () => ref.read(userProvider.notifier).deleteUser(user.id)),
               ],
             ),
           )),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDeletedUsersList(BuildContext context, WidgetRef ref, List<UserAccount> deleted) {
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.m),
-      decoration: BoxDecoration(color: const Color(0xFF1A1A1E), borderRadius: BorderRadius.circular(AppRadius.m), border: Border.all(color: Colors.white10)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Deleted Staff Members', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
-          const Divider(color: Colors.white10, height: 24),
-          if (deleted.isEmpty) 
-            const Padding(padding: EdgeInsets.all(20), child: Text('No deleted users.', style: TextStyle(color: Colors.white24, fontSize: 12)))
-          else
-            ListView.builder(
-              shrinkWrap: true,
-              itemCount: deleted.length,
-              itemBuilder: (context, index) {
-                final user = deleted[index];
-                return ListTile(
-                  dense: true,
-                  title: Text(user.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  subtitle: Text(user.role.name.toUpperCase(), style: const TextStyle(color: Colors.white38, fontSize: 10)),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.restore, color: Colors.green, size: 20),
-                    tooltip: 'Restore User',
-                    onPressed: () => ref.read(userProvider.notifier).restoreUser(user.id),
-                  ),
-                );
-              },
-            ),
         ],
       ),
     );

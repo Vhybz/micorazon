@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/butcher_models.dart';
@@ -9,56 +10,107 @@ import 'audit_service.dart';
 class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>> {
   final SupabaseButcherService _service;
   final Ref ref;
+  Timer? _heartbeat;
   
-  // Track IDs of items that were added locally but not yet confirmed by the server
   final Set<String> _pendingSyncIds = {};
   final List<SlaughterLog> _localItems = [];
-  
-  // NEW: Track local status overrides to prevent "reverting" UI during sync
   final Map<String, SlaughterStatus> _statusOverrides = {};
 
   SlaughterLogNotifier(this._service, this.ref) : super(const AsyncValue.loading()) {
+    _init();
+    _startHeartbeat();
+  }
+
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (mounted) loadLogs(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _heartbeat?.cancel();
+    super.dispose();
+  }
+
+  void _init() {
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        loadLogs();
+      }
+    });
     loadLogs();
   }
 
   Future<void> loadLogs({bool silent = false}) async {
-    final branchCode = ref.read(currentUserProvider)?.branchCode;
+    final user = ref.read(currentUserProvider);
+    final branchCode = user?.branchCode;
+    
     if (branchCode == null) {
-      if (!silent) state = const AsyncValue.data([]);
+      if (user == null && !silent) {
+        state = const AsyncValue.loading();
+      } else {
+        if (!silent) state = const AsyncValue.data([]);
+      }
       return;
     }
+    
     try {
       if (!silent && !state.hasValue) state = const AsyncValue.loading();
       
       final remoteLogs = await _service.getSlaughterLogs(branchCode);
       
-      // Cleanup: Remove local items that are now present in the remote list
+      final pendingIntakes = OfflineSyncService.getPendingItems('INTAKE')
+          .map((json) {
+            try { return SlaughterLog.fromJson(json); } catch (e) { return null; }
+          })
+          .whereType<SlaughterLog>()
+          .where((l) => l.branchCode == branchCode);
+          
+      final pendingUpdates = OfflineSyncService.getPendingItems('UPDATE_SLAUGHTER')
+          .map((json) {
+            try { return SlaughterLog.fromJson(json); } catch (e) { return null; }
+          })
+          .whereType<SlaughterLog>()
+          .where((l) => l.branchCode == branchCode);
+      
       final remoteIds = remoteLogs.map((l) => l.id).toSet();
       final remoteTags = remoteLogs.map((l) => l.tagNumber).whereType<String>().toSet();
       
       _pendingSyncIds.removeWhere((id) => remoteIds.contains(id));
       _localItems.removeWhere((l) => remoteIds.contains(l.id) || (l.tagNumber != null && remoteTags.contains(l.tagNumber)));
       
-      // Apply status overrides to remote logs to prevent UI flickering/reverting
-      // Priority: local override > server status
-      final mergedLogs = remoteLogs.map((log) {
+      final Map<String, SlaughterLog> allLogs = {};
+      for (var log in remoteLogs) {
+        allLogs[log.id] = log;
+      }
+      for (var log in pendingIntakes) {
+        if (!allLogs.containsKey(log.id)) allLogs[log.id] = log;
+      }
+      for (var log in pendingUpdates) {
+        allLogs[log.id] = log;
+      }
+
+      final mergedLogs = allLogs.values.map((log) {
         if (_statusOverrides.containsKey(log.id)) {
           final localStatus = _statusOverrides[log.id]!;
-          
-          // If the server has reached or passed our local status, we can clear the override
-          // Logic: processed (4) > completed (3) > cleaned (2) > slaughtering (1) > pending (0)
           if (log.status.index >= localStatus.index) {
             _statusOverrides.remove(log.id);
             return log;
           }
-          
-          // Otherwise, stay locked to the local status for UI consistency
           return log.copyWith(status: localStatus);
         }
         return log;
       }).toList();
 
-      state = AsyncValue.data([..._localItems, ...mergedLogs]);
+      mergedLogs.sort((a, b) {
+        if (a.status != b.status) return a.status.index.compareTo(b.status.index);
+        return (b.slaughterTime ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(a.slaughterTime ?? DateTime.fromMillisecondsSinceEpoch(0));
+      });
+
+      state = AsyncValue.data(mergedLogs);
     } catch (e) {
       if (!silent) state = AsyncValue.error(e, StackTrace.current);
       debugPrint('Load Logs Error: $e');
@@ -71,13 +123,11 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
       if (branchCode == null) throw Exception('No branch code assigned to user');
       final logWithBranch = log.copyWith(branchCode: branchCode);
       
-      // 1. Add to Offline Queue (Hive)
       await OfflineSyncService.addToQueue(
         actionType: 'INTAKE', 
         data: logWithBranch.toJson(),
       );
 
-      // 1b. Audit Log
       await AuditService.log(
         ref: ref, 
         action: 'INTAKE_CREATED', 
@@ -86,11 +136,9 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
         newData: logWithBranch.toJson(),
       );
 
-      // 2. Track locally
       _pendingSyncIds.add(logWithBranch.id);
       _localItems.insert(0, logWithBranch);
 
-      // 3. Update state immediately
       final currentData = state.value ?? [];
       state = AsyncValue.data([..._localItems, ...currentData.where((l) => !_pendingSyncIds.contains(l.id))]);
     } catch (e) {
@@ -116,7 +164,7 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
       'branch_code': branchCode,
       'type': type.name,
       'weight': weight,
-      'purchase_price': farmPrice ?? price, // Map to purchase_price in DB
+      'purchase_price': farmPrice ?? price, 
       'source_farm': sourceFarm,
       'status': 'waiting',
       'arrival_time': DateTime.now().toIso8601String(),
@@ -135,7 +183,6 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
       if (logIndex == -1) return;
       
       final log = logs[logIndex];
-      // Set time for both 'slaughtering' and 'completed' to ensure they sort correctly
       final time = (status == SlaughterStatus.slaughtering || status == SlaughterStatus.completed) 
           ? DateTime.now() 
           : log.slaughterTime;
@@ -145,26 +192,19 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
         slaughterTime: time,
       );
 
-      // 1. Record override to prevent sync reverting the UI
       _statusOverrides[id] = status;
-      debugPrint('State Lock: Animal $id status manually set to ${status.name}');
-
-      // 2. Add to Offline Queue (Update)
       await OfflineSyncService.addToQueue(
         actionType: 'UPDATE_SLAUGHTER',
         data: updatedLog.toJson(),
       );
 
-      // 3. Update state immediately (Local state takes precedence)
       state = AsyncValue.data([
         for (final l in (state.value ?? []))
           if (l.id == id) updatedLog else l
       ]);
       
-      // 4. Manual refresh after a short delay to confirm with server
       Future.delayed(const Duration(seconds: 2), () => loadLogs(silent: true));
 
-      // 5. Special handling for completion
       if (status == SlaughterStatus.completed) {
         ref.read(meatBatchesProvider.notifier).loadBatches(silent: true);
       }
@@ -175,21 +215,21 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
 
   Future<void> updateSlaughterRecord(SlaughterLog log) async {
     try {
-      // Record override for this log too
       _statusOverrides[log.id] = log.status;
-
-      // 1. Add to Offline Queue (Update)
       await OfflineSyncService.addToQueue(
         actionType: 'UPDATE_SLAUGHTER', 
         data: log.toJson(),
       );
 
-      state.whenData((logs) {
-        state = AsyncValue.data([
-          for (final l in logs)
-            if (l.id == log.id) log else l
-        ]);
-      });
+      final currentLogs = state.value ?? [];
+      state = AsyncValue.data([
+        for (final l in currentLogs)
+          if (l.id == log.id) log else l
+      ]);
+      
+      final localIdx = _localItems.indexWhere((l) => l.id == log.id);
+      if (localIdx != -1) _localItems[localIdx] = log;
+
     } catch (e) {
       debugPrint('Error updating slaughter record: $e');
     }
@@ -205,21 +245,85 @@ final slaughterLogsProvider = StateNotifierProvider<SlaughterLogNotifier, AsyncV
 class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
   final SupabaseButcherService _service;
   final Ref ref;
+  Timer? _heartbeat;
+
+  final Set<String> _pendingSyncIds = {};
+  final List<MeatBatch> _localItems = [];
 
   MeatBatchNotifier(this._service, this.ref) : super(const AsyncValue.loading()) {
+    _init();
+    _startHeartbeat();
+  }
+
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (mounted) loadBatches(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _heartbeat?.cancel();
+    super.dispose();
+  }
+
+  void _init() {
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        loadBatches();
+      }
+    });
     loadBatches();
   }
 
   Future<void> loadBatches({bool silent = false}) async {
-    final branchCode = ref.read(currentUserProvider)?.branchCode;
+    final user = ref.read(currentUserProvider);
+    final branchCode = user?.branchCode;
+    
     if (branchCode == null) {
-      if (!silent) state = const AsyncValue.data([]);
+      if (user == null && !silent) {
+        state = const AsyncValue.loading();
+      } else {
+        if (!silent) state = const AsyncValue.data([]);
+      }
       return;
     }
+    
     try {
-      if (!silent) state = const AsyncValue.loading();
-      final batches = await _service.getActiveBatches(branchCode);
-      state = AsyncValue.data(batches);
+      if (!silent && !state.hasValue) state = const AsyncValue.loading();
+      
+      final remoteBatches = await _service.getActiveBatches(branchCode);
+      
+      final pendingCreates = OfflineSyncService.getPendingItems('CREATE_BATCH')
+          .map((json) {
+            try { return MeatBatch.fromJson(json); } catch (e) { return null; }
+          })
+          .whereType<MeatBatch>()
+          .where((b) => b.branchCode == branchCode);
+          
+      final pendingUpdates = OfflineSyncService.getPendingItems('UPDATE_BATCH')
+          .map((json) {
+            try { return MeatBatch.fromJson(json); } catch (e) { return null; }
+          })
+          .whereType<MeatBatch>()
+          .where((b) => b.branchCode == branchCode);
+
+      final Map<String, MeatBatch> allBatches = {};
+      for (var b in remoteBatches) {
+        allBatches[b.id] = b;
+      }
+      for (var b in pendingCreates) {
+        if (!allBatches.containsKey(b.id)) allBatches[b.id] = b;
+      }
+      for (var b in pendingUpdates) {
+        allBatches[b.id] = b;
+      }
+
+      final merged = allBatches.values.where((b) => b.status != 'completed').toList();
+      merged.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      
+      state = AsyncValue.data(merged);
     } catch (e) {
       if (!silent) state = AsyncValue.error(e, StackTrace.current);
     }
@@ -231,13 +335,11 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
       if (branchCode == null) throw Exception('No branch code assigned to user');
       final batchWithBranch = batch.copyWith(branchCode: branchCode);
       
-      // 1. Add to Offline Queue
       await OfflineSyncService.addToQueue(
         actionType: 'CREATE_BATCH', 
         data: batchWithBranch.toJson(),
       );
 
-      // 1b. Audit Log
       await AuditService.log(
         ref: ref,
         action: 'BATCH_CREATED',
@@ -246,10 +348,11 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
         newData: batchWithBranch.toJson(),
       );
 
-      // 2. Optimistic Update
-      state.whenData((batches) {
-        state = AsyncValue.data([batchWithBranch, ...batches]);
-      });
+      _pendingSyncIds.add(batchWithBranch.id);
+      _localItems.insert(0, batchWithBranch);
+
+      final currentData = state.value ?? [];
+      state = AsyncValue.data([..._localItems, ...currentData.where((b) => !_pendingSyncIds.contains(b.id))]);
     } catch (e) {
       debugPrint('Error adding meat batch: $e');
     }
@@ -260,52 +363,38 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
       final branchCode = ref.read(currentUserProvider)?.branchCode;
       if (branchCode == null) throw Exception('No branch code assigned');
 
-      final currentBatches = state.value ?? [];
-      final existingBatch = currentBatches.firstWhere((b) => b.id == log.id, 
-        orElse: () => MeatBatch(
-          id: log.id,
-          branchCode: branchCode,
-          animalId: log.animalId,
-          meatType: log.type.displayName,
-          weight: log.meatWeight,
-          costPrice: log.farmPrice ?? 0.0,
-          createdAt: DateTime.now(),
-          status: 'transporting',
-          source: BatchSource(name: 'Direct Slaughter', location: branchCode, owner: 'Mi~Corazon'),
-        )
-      );
-
-      final updatedBatch = existingBatch.copyWith(
+      final updatedBatch = MeatBatch(
+        id: log.id,
+        branchCode: branchCode,
+        animalId: log.animalId,
+        meatType: log.type.displayName,
+        weight: log.meatWeight,
+        costPrice: log.farmPrice ?? 0.0,
+        createdAt: DateTime.now(),
         status: MeatBatchStatus.preparing.name,
+        source: BatchSource(name: 'Direct Slaughter', location: branchCode, owner: 'Mi~Corazon'),
         receivedBy: receivedBy,
       );
 
-      // 1. Mark the animal as "Processed" in the slaughter log
       final updatedLog = log.copyWith(status: SlaughterStatus.processed);
       await OfflineSyncService.addToQueue(
         actionType: 'UPDATE_SLAUGHTER', 
         data: updatedLog.toJson(),
       );
 
-      // 2. Update the Meat Batch status to "preparing"
       await OfflineSyncService.addToQueue(
         actionType: 'UPDATE_BATCH', 
         data: updatedBatch.toJson(),
       );
 
-      // 3. Optimistic Update local state
-      state = AsyncValue.data([
-        for (final b in currentBatches)
-          if (b.id == log.id) updatedBatch else b
-      ]);
-      
-      // If it wasn't in the list yet (rare case), add it
-      if (!currentBatches.any((b) => b.id == log.id)) {
-        state = AsyncValue.data([updatedBatch, ...currentBatches]);
-      }
+      _pendingSyncIds.add(updatedBatch.id);
+      _localItems.removeWhere((b) => b.id == updatedBatch.id);
+      _localItems.insert(0, updatedBatch);
 
-      // Update the slaughter logs state locally
-      ref.read(slaughterLogsProvider.notifier).loadLogs(silent: true);
+      final currentData = state.value ?? [];
+      state = AsyncValue.data([..._localItems, ...currentData.where((b) => !_pendingSyncIds.contains(b.id))]);
+
+      ref.read(slaughterLogsProvider.notifier).updateSlaughterRecord(updatedLog);
     } catch (e) {
       debugPrint('Error receiving carcass: $e');
     }
@@ -314,18 +403,25 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
   Future<void> updateBatchProcessingStatus(String id, MeatBatchStatus status) async {
     try {
       final batches = state.value ?? [];
-      final batch = batches.firstWhere((b) => b.id == id);
-      final updatedBatch = batch.copyWith(status: status.name);
+      final batchIndex = batches.indexWhere((b) => b.id == id);
+      if (batchIndex == -1) return;
+      
+      final updatedBatch = batches[batchIndex].copyWith(status: status.name);
 
-      // 1. Add to Offline Queue
       await OfflineSyncService.addToQueue(
         actionType: 'UPDATE_BATCH',
         data: updatedBatch.toJson(),
       );
 
-      // 2. Immediate State Update
+      final existingLocalIndex = _localItems.indexWhere((b) => b.id == id);
+      if (existingLocalIndex != -1) {
+        _localItems[existingLocalIndex] = updatedBatch;
+      } else {
+        _localItems.add(updatedBatch);
+      }
+
       state = AsyncValue.data([
-        for (final b in batches)
+        for (final b in (state.value ?? []))
           if (b.id == id) updatedBatch else b
       ]);
     } catch (e) {
@@ -336,17 +432,20 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
   Future<void> closeBatch(String id) async {
     try {
       final batches = state.value ?? [];
-      final batch = batches.firstWhere((b) => b.id == id);
-      final updatedBatch = batch.copyWith(status: 'completed');
+      final batchIndex = batches.indexWhere((b) => b.id == id);
+      if (batchIndex == -1) return;
+      
+      final updatedBatch = batches[batchIndex].copyWith(status: 'completed');
 
-      // 1. Add to Offline Queue
       await OfflineSyncService.addToQueue(
         actionType: 'UPDATE_BATCH',
         data: updatedBatch.toJson(),
       );
 
-      // 2. Immediate State Update (Remove from active list)
-      state = AsyncValue.data(batches.where((b) => b.id != id).toList());
+      _localItems.removeWhere((b) => b.id == id);
+      _pendingSyncIds.remove(id);
+
+      state = AsyncValue.data((state.value ?? []).where((b) => b.id != id).toList());
     } catch (e) {
       debugPrint('Error closing batch: $e');
     }
@@ -362,7 +461,6 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
       final branchCode = ref.read(currentUserProvider)?.branchCode;
       if (branchCode == null) throw Exception('No branch code assigned');
 
-      // 1. Create the Meat Batch record first
       final batch = MeatBatch(
         id: log.id,
         branchCode: branchCode,
@@ -371,7 +469,7 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
         weight: totalCarcassWeight,
         costPrice: log.farmPrice ?? 0.0,
         createdAt: DateTime.now(),
-        status: MeatBatchStatus.preparing.name, // Changed from transporting to preparing
+        status: MeatBatchStatus.preparing.name,
         source: BatchSource(
           name: 'Direct Slaughter',
           location: branchCode,
@@ -379,34 +477,32 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
         ),
       );
 
+      _pendingSyncIds.add(batch.id);
+      _localItems.removeWhere((b) => b.id == batch.id);
+      _localItems.insert(0, batch);
+      
+      state = AsyncValue.data([..._localItems, ...(state.value ?? []).where((b) => !_pendingSyncIds.contains(b.id))]);
+
       await OfflineSyncService.addToQueue(
         actionType: 'CREATE_BATCH',
         data: batch.toJson(),
       );
 
-      // 2. Add the cuts referencing the batch
       for (final cut in cuts) {
         await ref.read(recentCutsProvider.notifier).addCut(cut);
       }
 
-      // 3. Add waste record if any
       if (waste > 0) {
         await ref.read(butcherWasteProvider.notifier).addWaste(log.id, 'Slaughter Waste/Bones', waste);
       }
 
-      // 4. Mark Slaughter as fully Processed (removes from pipeline, moves to production floor)
       final updatedLog = log.copyWith(
-        status: SlaughterStatus.processed, // Changed from completed to processed
+        status: SlaughterStatus.processed,
         meatWeight: totalCarcassWeight,
         slaughterTime: DateTime.now(),
       );
       
       await ref.read(slaughterLogsProvider.notifier).updateSlaughterRecord(updatedLog);
-
-      // 5. Update local batches list
-      final currentBatches = state.value ?? [];
-      state = AsyncValue.data([batch, ...currentBatches]);
-      
     } catch (e) {
       debugPrint('Error initiating batch: $e');
       rethrow;
@@ -423,21 +519,75 @@ final meatBatchesProvider = activeBatchesProvider;
 class MeatCutNotifier extends StateNotifier<AsyncValue<List<MeatCut>>> {
   final SupabaseButcherService _service;
   final Ref ref;
+  Timer? _heartbeat;
+
+  final Set<String> _pendingSyncIds = {};
+  final List<MeatCut> _localItems = [];
 
   MeatCutNotifier(this._service, this.ref) : super(const AsyncValue.loading()) {
+    _init();
+    _startHeartbeat();
+  }
+
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (mounted) loadCuts(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _heartbeat?.cancel();
+    super.dispose();
+  }
+
+  void _init() {
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        loadCuts();
+      }
+    });
     loadCuts();
   }
 
   Future<void> loadCuts({bool silent = false}) async {
-    final branchCode = ref.read(currentUserProvider)?.branchCode;
+    final user = ref.read(currentUserProvider);
+    final branchCode = user?.branchCode;
+    
     if (branchCode == null) {
-      if (!silent) state = const AsyncValue.data([]);
+      if (user == null && !silent) {
+        state = const AsyncValue.loading();
+      } else {
+        if (!silent) state = const AsyncValue.data([]);
+      }
       return;
     }
+    
     try {
-      if (!silent) state = const AsyncValue.loading();
-      final cuts = await _service.getRecentCuts(branchCode);
-      state = AsyncValue.data(cuts);
+      if (!silent && !state.hasValue) state = const AsyncValue.loading();
+      
+      final remoteCuts = await _service.getRecentCuts(branchCode);
+      
+      final pendingCuts = OfflineSyncService.getPendingItems('CUT')
+          .map((json) {
+            try { return MeatCut.fromJson(json); } catch (e) { return null; }
+          })
+          .whereType<MeatCut>()
+          .where((c) => c.branchCode == branchCode);
+
+      final Map<String, MeatCut> allCuts = {};
+      for (var c in remoteCuts) {
+        allCuts[c.id] = c;
+      }
+      for (var c in pendingCuts) {
+        if (!allCuts.containsKey(c.id)) allCuts[c.id] = c;
+      }
+
+      final merged = allCuts.values.toList();
+      merged.sort((a, b) => b.processedAt.compareTo(a.processedAt));
+
+      state = AsyncValue.data(merged);
     } catch (e) {
       if (!silent) state = AsyncValue.error(e, StackTrace.current);
     }
@@ -449,16 +599,16 @@ class MeatCutNotifier extends StateNotifier<AsyncValue<List<MeatCut>>> {
       if (branchCode == null) throw Exception('No branch code assigned to user');
       final cutWithBranch = cut.copyWith(branchCode: branchCode);
       
-      // 1. Add to Offline Queue
       await OfflineSyncService.addToQueue(
         actionType: 'CUT', 
         data: cutWithBranch.toJson(),
       );
 
-      // 2. Optimistic Update
-      state.whenData((cuts) {
-        state = AsyncValue.data([cutWithBranch, ...cuts]);
-      });
+      _pendingSyncIds.add(cutWithBranch.id);
+      _localItems.insert(0, cutWithBranch);
+
+      final currentData = state.value ?? [];
+      state = AsyncValue.data([..._localItems, ...currentData.where((c) => !_pendingSyncIds.contains(c.id))]);
     } catch (e) {
       debugPrint('Error adding meat cut: $e');
     }
@@ -475,13 +625,50 @@ class MeatCutNotifier extends StateNotifier<AsyncValue<List<MeatCut>>> {
           actionType: 'CUT', 
           data: cut.toJson(),
         );
+        _pendingSyncIds.add(cut.id);
+        _localItems.insert(0, cut);
       }
       
-      state.whenData((currentCuts) {
-        state = AsyncValue.data([...cutsWithBranch, ...currentCuts]);
-      });
+      final currentData = state.value ?? [];
+      state = AsyncValue.data([..._localItems, ...currentData.where((c) => !_pendingSyncIds.contains(c.id))]);
     } catch (e) {
       debugPrint('Error adding multiple cuts: $e');
+    }
+  }
+
+  Future<void> updateCutWeight(String id, double newWeight) async {
+    try {
+      final cuts = state.value ?? [];
+      final index = cuts.indexWhere((c) => c.id == id);
+      if (index == -1) return;
+
+      final updatedCut = cuts[index].copyWith(weight: newWeight);
+
+      await OfflineSyncService.addToQueue(
+        actionType: 'CUT', 
+        data: updatedCut.toJson(),
+      );
+
+      state = AsyncValue.data([
+        for (final c in cuts)
+          if (c.id == id) updatedCut else c
+      ]);
+    } catch (e) {
+      debugPrint('Error updating cut weight: $e');
+    }
+  }
+
+  Future<void> deleteCut(String id) async {
+    try {
+      await OfflineSyncService.addToQueue(
+        actionType: 'DELETE_CUT',
+        data: {'id': id},
+      );
+      state.whenData((cuts) {
+        state = AsyncValue.data(cuts.where((c) => c.id != id).toList());
+      });
+    } catch (e) {
+      debugPrint('Error deleting cut: $e');
     }
   }
 }
@@ -493,17 +680,48 @@ final recentCutsProvider = StateNotifierProvider<MeatCutNotifier, AsyncValue<Lis
 class ButcherWasteNotifier extends StateNotifier<AsyncValue<List<Map<String, dynamic>>>> {
   final SupabaseButcherService _service;
   final Ref ref;
+  Timer? _heartbeat;
 
   ButcherWasteNotifier(this._service, this.ref) : super(const AsyncValue.loading()) {
+    _init();
+    _startHeartbeat();
+  }
+
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (mounted) loadWaste(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _heartbeat?.cancel();
+    super.dispose();
+  }
+
+  void _init() {
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        loadWaste();
+      }
+    });
     loadWaste();
   }
 
   Future<void> loadWaste({bool silent = false}) async {
-    final branchCode = ref.read(currentUserProvider)?.branchCode;
+    final user = ref.read(currentUserProvider);
+    final branchCode = user?.branchCode;
+    
     if (branchCode == null) {
-      if (!silent) state = const AsyncValue.data([]);
+      if (user == null && !silent) {
+        state = const AsyncValue.loading();
+      } else {
+        if (!silent) state = const AsyncValue.data([]);
+      }
       return;
     }
+
     try {
       if (!silent) state = const AsyncValue.loading();
       final waste = await _service.getWaste(branchCode);
@@ -526,13 +744,11 @@ class ButcherWasteNotifier extends StateNotifier<AsyncValue<List<Map<String, dyn
         'recorded_at': DateTime.now().toIso8601String(),
       };
 
-      // 1. Add to Offline Queue (Hive)
       await OfflineSyncService.addToQueue(
         actionType: 'WASTE', 
         data: wasteData,
       );
 
-      // 1b. Audit Log
       await AuditService.log(
         ref: ref,
         action: 'WASTE_RECORDED',
@@ -540,7 +756,6 @@ class ButcherWasteNotifier extends StateNotifier<AsyncValue<List<Map<String, dyn
         newData: wasteData,
       );
 
-      // 2. Optimistic UI update (refresh list)
       loadWaste(silent: true); 
     } catch (e) {
       debugPrint('Error adding waste (Queue): $e');
@@ -555,17 +770,48 @@ final butcherWasteProvider = StateNotifierProvider<ButcherWasteNotifier, AsyncVa
 class ButcherOrderNotifier extends StateNotifier<AsyncValue<List<ButcherOrder>>> {
   final SupabaseButcherService _service;
   final Ref ref;
+  Timer? _heartbeat;
 
   ButcherOrderNotifier(this._service, this.ref) : super(const AsyncValue.loading()) {
+    _init();
+    _startHeartbeat();
+  }
+
+  void _startHeartbeat() {
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (mounted) loadOrders(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _heartbeat?.cancel();
+    super.dispose();
+  }
+
+  void _init() {
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        loadOrders();
+      }
+    });
     loadOrders();
   }
 
   Future<void> loadOrders({bool silent = false}) async {
-    final branchCode = ref.read(currentUserProvider)?.branchCode;
+    final user = ref.read(currentUserProvider);
+    final branchCode = user?.branchCode;
+    
     if (branchCode == null) {
-      if (!silent) state = const AsyncValue.data([]);
+      if (user == null && !silent) {
+        state = const AsyncValue.loading();
+      } else {
+        if (!silent) state = const AsyncValue.data([]);
+      }
       return;
     }
+
     try {
       if (!silent) state = const AsyncValue.loading();
       final orders = await _service.getButcherOrders(branchCode);

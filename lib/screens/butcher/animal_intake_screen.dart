@@ -7,7 +7,10 @@ import '../../models/butcher_models.dart';
 import '../../services/butcher_service.dart';
 import '../../services/user_provider.dart';
 import '../../services/butcher_navigation_provider.dart';
+import '../../core/utils.dart';
 import '../../widgets/responsive_layout.dart';
+
+import '../../core/uuid_utils.dart';
 
 class AnimalIntakeScreen extends ConsumerStatefulWidget {
   const AnimalIntakeScreen({super.key});
@@ -32,10 +35,12 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
   bool _isChicken = false;
   bool _isHard = true;
   bool _isSubmitting = false;
-  DateTime _intakeDate = DateTime.now();
-
+  WeightUnit _liveWeightUnit = WeightUnit.kg;
+  WeightUnit _meatWeightUnit = WeightUnit.kg;
   double _weightLoss = 0;
   double _yieldPercent = 0;
+  DateTime _intakeDate = DateTime.now();
+
 
   @override
   void initState() {
@@ -48,8 +53,12 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
   }
 
   void _calculateMetrics() {
-    final live = double.tryParse(_liveWeightController.text) ?? 0;
-    final meat = double.tryParse(_meatWeightController.text) ?? 0;
+    double live = double.tryParse(_liveWeightController.text) ?? 0;
+    double meat = double.tryParse(_meatWeightController.text) ?? 0;
+    
+    // Convert to KG for calculation
+    if (_liveWeightUnit == WeightUnit.lb) live = WeightConverter.toKg(live);
+    if (_meatWeightUnit == WeightUnit.lb) meat = WeightConverter.toKg(meat);
     
     setState(() {
       _weightLoss = live - meat;
@@ -66,9 +75,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
 
   String _generateTagID() {
     final typeCode = _selectedType?.shortCode ?? 'ANM';
-    final date = DateFormat('yyyyMMdd').format(DateTime.now());
-    final random = (100 + (DateTime.now().millisecond % 900)).toString();
-    return '$typeCode-$date-$random';
+    return IdGenerator.generate(prefix: typeCode);
   }
 
   Widget _buildTypeDropdown() {
@@ -157,44 +164,70 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
   }
 
   Widget _buildLiveWeightField() {
-    return TextFormField(
-      controller: _liveWeightController,
-      decoration: const InputDecoration(
-        labelText: 'Live Weight (kg)', 
-        hintText: 'e.g. 250.5',
-        border: OutlineInputBorder(), 
-        prefixIcon: Icon(Icons.scale), 
-        isDense: true
-      ),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-      validator: (v) {
-        if (v == null || v.isEmpty) return 'Required';
-        final n = double.tryParse(v);
-        if (n == null || n <= 0) return 'Invalid';
-        return null;
-      },
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: TextFormField(
+            controller: _liveWeightController,
+            decoration: InputDecoration(
+              labelText: 'Live Weight (${_liveWeightUnit.name})', 
+              hintText: 'e.g. 250.5',
+              border: const OutlineInputBorder(), 
+              prefixIcon: const Icon(Icons.scale), 
+              isDense: true
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+            onChanged: (_) => _calculateMetrics(),
+          ),
+        ),
+        const SizedBox(width: 8),
+        DropdownButton<WeightUnit>(
+          value: _liveWeightUnit,
+          items: WeightUnit.values.where((u) => u != WeightUnit.unit).map((u) => DropdownMenuItem(value: u, child: Text(u.name.toUpperCase()))).toList(),
+          onChanged: (v) {
+            setState(() {
+              _liveWeightUnit = v!;
+              _calculateMetrics();
+            });
+          },
+        ),
+      ],
     );
   }
 
   Widget _buildMeatWeightField() {
-    return TextFormField(
-      controller: _meatWeightController,
-      decoration: const InputDecoration(
-        labelText: 'Meat Weight (kg)', 
-        hintText: 'e.g. 180.2',
-        border: OutlineInputBorder(), 
-        prefixIcon: Icon(Icons.shopping_basket_outlined), 
-        isDense: true
-      ),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-      validator: (v) {
-        if (v == null || v.isEmpty) return 'Required';
-        final n = double.tryParse(v);
-        if (n == null || n < 0) return 'Invalid';
-        return null;
-      },
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: TextFormField(
+            controller: _meatWeightController,
+            decoration: InputDecoration(
+              labelText: 'Meat Weight (${_meatWeightUnit.name})', 
+              hintText: 'e.g. 180.2',
+              border: const OutlineInputBorder(), 
+              prefixIcon: const Icon(Icons.shopping_basket_outlined), 
+              isDense: true
+            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+            onChanged: (_) => _calculateMetrics(),
+          ),
+        ),
+        const SizedBox(width: 8),
+        DropdownButton<WeightUnit>(
+          value: _meatWeightUnit,
+          items: WeightUnit.values.where((u) => u != WeightUnit.unit).map((u) => DropdownMenuItem(value: u, child: Text(u.name.toUpperCase()))).toList(),
+          onChanged: (v) {
+            setState(() {
+              _meatWeightUnit = v!;
+              _calculateMetrics();
+            });
+          },
+        ),
+      ],
     );
   }
 
@@ -491,23 +524,27 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
         final tagNumber = _tagNumberController.text;
         final manualFarmTag = _manualFarmTagController.text.isNotEmpty ? _manualFarmTagController.text : null;
         final type = _selectedType!;
-        final liveWeight = double.tryParse(_liveWeightController.text) ?? 0;
-        final meatWeight = double.tryParse(_meatWeightController.text) ?? 0;
+        final double liveWeight = _liveWeightUnit == WeightUnit.kg 
+            ? (double.tryParse(_liveWeightController.text) ?? 0) 
+            : WeightConverter.toKg(double.tryParse(_liveWeightController.text) ?? 0);
+        
+        final double meatWeight = _meatWeightUnit == WeightUnit.kg 
+            ? (double.tryParse(_meatWeightController.text) ?? 0) 
+            : WeightConverter.toKg(double.tryParse(_meatWeightController.text) ?? 0);
+        
         final price = double.tryParse(_priceController.text) ?? 0;
+
         final farmPrice = double.tryParse(_farmPriceController.text);
         final branchCode = user!.branchCode!;
 
-        final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-        final String suffix = timestamp.substring(timestamp.length - 12);
-        
-        // Generate valid UUID formats
-        final String batchId = 'aaaaaaaa-aaaa-aaaa-aaaa-$suffix';
-        final String animalUuid = 'bbbbbbbb-bbbb-bbbb-bbbb-$suffix';
+        // Generate proper database UUIDs and human-readable tag numbers
+        final String logUuid = UuidUtils.generate();
+        final String animalUuid = UuidUtils.generate();
 
         final log = SlaughterLog(
-          id: batchId,
+          id: logUuid,
           animalId: animalUuid, 
-          tagNumber: tagNumber, 
+          tagNumber: _tagNumberController.text,
           manualFarmTag: manualFarmTag,
           type: type,
           liveWeight: liveWeight,

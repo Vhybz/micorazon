@@ -19,16 +19,17 @@ class ExpenseRecord {
     this.receiptUrl,
   });
 
-  factory ExpenseRecord.fromJson(Map<String, dynamic> json) {
+  factory ExpenseRecord.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return ExpenseRecord(
-      id: json['id'],
-      branchCode: json['branch_code'],
-      title: json['description'] ?? '',
-      category: json['category'],
-      amount: (json['amount'] as num).toDouble(),
-      date: DateTime.parse(json['date']),
-      notes: json['notes'],
-      receiptUrl: json['receipt_url'],
+      id: map['id'],
+      branchCode: map['branch_code'],
+      title: map['description'] ?? '',
+      category: map['category'],
+      amount: (map['amount'] as num).toDouble(),
+      date: DateTime.parse(map['date']),
+      notes: map['notes'],
+      receiptUrl: map['receipt_url'],
     );
   }
 

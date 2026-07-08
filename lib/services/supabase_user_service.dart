@@ -4,7 +4,7 @@ import '../models/user_model.dart';
 import '../core/supabase_config.dart';
 
 class SupabaseUserService {
-  final _client = SupabaseConfig.client;
+  SupabaseClient get _client => SupabaseConfig.client;
 
   Future<List<UserAccount>> getUsers() async {
     final response = await _client
@@ -16,7 +16,9 @@ class SupabaseUserService {
   }
 
   Future<void> addUser(UserAccount account) async {
-    await _client.from('users').upsert(account.toJson(), onConflict: 'email');
+    final data = account.toJson();
+    data['is_deleted'] = false; // Always ensure new/upserted accounts are active
+    await _client.from('users').upsert(data, onConflict: 'email');
   }
 
   Future<void> updateUser(UserAccount account) async {
@@ -41,10 +43,18 @@ class SupabaseUserService {
   }
 
   Future<void> hardDeleteUser(String id) async {
+    // 1. Delete from public.users first
     await _client
         .from('users')
         .delete()
         .eq('id', id);
+
+    // 2. If successful, delete from Auth too
+    try {
+      await SupabaseConfig.adminClient.auth.admin.deleteUser(id);
+    } catch (e) {
+      debugPrint('SupabaseUserService: Auth cleanup failed (possibly already deleted or insufficient permissions): $e');
+    }
   }
 
   Future<UserAccount?> getUserById(String id) async {
@@ -124,5 +134,12 @@ class SupabaseUserService {
         .stream(primaryKey: ['id'])
         .eq('id', id)
         .map((data) => data.isEmpty ? null : UserAccount.fromJson(data.first));
+  }
+
+  Stream<List<UserAccount>> watchUsers() {
+    return _client
+        .from('users')
+        .stream(primaryKey: ['id'])
+        .map((data) => data.map((json) => UserAccount.fromJson(json)).where((u) => !u.isDeleted).toList());
   }
 }

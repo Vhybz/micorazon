@@ -58,43 +58,48 @@ class _ButcherLoadingState extends State<ButcherLoading> with SingleTickerProvid
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: widget.size,
-      height: widget.size,
-      child: AnimatedBuilder(
-        animation: _controller,
-        builder: (context, child) {
-          return Stack(
-            alignment: Alignment.center,
-            children: [
-              // Meat piece
-              Transform.translate(
-                offset: Offset(0, widget.size * 0.15 + _meatVibration.value),
-                child: _buildMeat(),
-              ),
-              
-              // Larger Cleaver
-              Positioned(
-                top: 0,
-                child: Transform.translate(
-                  offset: Offset(0, _knifeAnimation.value * widget.size * 0.5),
-                  child: Transform.rotate(
-                    angle: _knifeAnimation.value * 0.15,
-                    child: _buildRealisticCleaver(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double currentSize = math.min(widget.size, constraints.maxHeight);
+        return SizedBox(
+          width: currentSize,
+          height: currentSize,
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) {
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Meat piece
+                  Transform.translate(
+                    offset: Offset(0, currentSize * 0.15 + _meatVibration.value),
+                    child: _buildMeat(currentSize),
                   ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+                  
+                  // Larger Cleaver
+                  Positioned(
+                    top: 0,
+                    child: Transform.translate(
+                      offset: Offset(0, _knifeAnimation.value * currentSize * 0.5),
+                      child: Transform.rotate(
+                        angle: _knifeAnimation.value * 0.15,
+                        child: _buildRealisticCleaver(currentSize),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      }
     );
   }
 
-  Widget _buildMeat() {
+  Widget _buildMeat(double currentSize) {
     return Container(
-      width: widget.size * 0.7,
-      height: widget.size * 0.4,
+      width: currentSize * 0.7,
+      height: currentSize * 0.4,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFFB71C1C), Color(0xFFD32F2F), Color(0xFFC62828)],
@@ -102,10 +107,10 @@ class _ButcherLoadingState extends State<ButcherLoading> with SingleTickerProvid
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(widget.size * 0.1),
-          topRight: Radius.circular(widget.size * 0.25),
-          bottomLeft: Radius.circular(widget.size * 0.1),
-          bottomRight: Radius.circular(widget.size * 0.15),
+          topLeft: Radius.circular(currentSize * 0.1),
+          topRight: Radius.circular(currentSize * 0.25),
+          bottomLeft: Radius.circular(currentSize * 0.1),
+          bottomRight: Radius.circular(currentSize * 0.15),
         ),
         boxShadow: [
           BoxShadow(
@@ -121,8 +126,8 @@ class _ButcherLoadingState extends State<ButcherLoading> with SingleTickerProvid
     );
   }
 
-  Widget _buildRealisticCleaver() {
-    final knifeSize = widget.size * 0.75; // 25% bigger
+  Widget _buildRealisticCleaver(double currentSize) {
+    final knifeSize = currentSize * 0.75; // 25% bigger
     return SizedBox(
       width: knifeSize,
       height: knifeSize * 0.6,

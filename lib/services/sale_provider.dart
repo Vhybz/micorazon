@@ -2,7 +2,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/sale_model.dart';
+import '../models/customer_model.dart';
+import '../core/uuid_utils.dart';
+import 'customer_provider.dart';
 import 'supabase_sale_service.dart';
 import 'user_provider.dart';
 import 'product_service.dart';
@@ -26,6 +30,14 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
 
   void _init() {
     _loadFromCache();
+    
+    // Watch current user and restart subscription if branch changes
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        _initStream();
+      }
+    });
+
     _initStream();
   }
 
@@ -82,17 +94,11 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
   }
 
   Future<void> addSale(SaleRecord sale) async {
-    try {
-      final user = ref.read(currentUserProvider);
-      final saleWithBranch = sale.copyWith(branchCode: user?.branchCode);
-      
-      // 1. Add to Offline Queue (Hive) - This ensures data is safe even if network drops
-      await OfflineSyncService.addToQueue(
-        actionType: 'SALE', 
-        data: saleWithBranch.toJson(),
-      );
+    final user = ref.read(currentUserProvider);
+    final saleWithBranch = sale.copyWith(branchCode: user?.branchCode);
 
-      // 1b. Audit Log
+    try {
+      // 1. Audit Log (Source of truth tracking)
       await AuditService.log(
         ref: ref,
         action: 'SALE_CREATED',
@@ -101,20 +107,43 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
         newData: saleWithBranch.toJson(),
       );
 
-      // 2. Optimistic UI update: Add to local state immediately
-      state = [saleWithBranch, ...state];
-      
-      // 3. NO LONGER SUBTRACTING STOCK HERE
-      // Stock will be subtracted when the sale is VERIFIED.
+      // 2. Try Supabase First
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.saveSale(saleWithBranch);
+      } else {
+        throw Exception('Offline');
+      }
     } catch (e) {
-      debugPrint('Add Sale (Queue) Error: $e');
+      // 3. Fallback to Hive Queue
+      await OfflineSyncService.addToQueue(
+        actionType: 'SALE', 
+        data: saleWithBranch.toJson(),
+      );
+      // Optimistic local update
+      state = [saleWithBranch, ...state];
+    }
+
+    // 4. Auto-Register Debtor as Customer if missing
+    _ensureCustomerRegistered(saleWithBranch);
+
+    // 5. Update stock if verified
+    if (saleWithBranch.isVerified) {
+      for (final item in saleWithBranch.items) {
+        await ref.read(productsFutureProvider.notifier).updateStock(
+          item.product.id, 
+          -item.quantity, 
+          reason: 'SALE', 
+          referenceId: saleWithBranch.id,
+        );
+      }
     }
   }
 
   Future<void> verifySale(String saleId, {String? bankReceiptUrl, String? bankReceiptId}) async {
     try {
       final sale = state.firstWhere((s) => s.id == saleId);
-      if (sale.isVerified) return; // Already verified
+      if (sale.isVerified) return;
 
       final updatedSale = sale.copyWith(
         isVerified: true, 
@@ -123,10 +152,7 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
         bankReceiptId: bankReceiptId ?? sale.bankReceiptId,
       );
       
-      // 1. Update DB
-      await _service.updateSale(updatedSale);
-
-      // 1b. Audit Log
+      // Audit Log
       await AuditService.log(
         ref: ref,
         action: 'SALE_VERIFIED',
@@ -135,7 +161,17 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
         newData: updatedSale.toJson(),
       );
 
-      // 2. Subtract items from total stock (The user wants this after verification)
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateSale(updatedSale);
+      } else {
+        await OfflineSyncService.addToQueue(
+          actionType: 'SALE',
+          data: updatedSale.toJson(),
+        );
+        state = [for (final s in state) if (s.id == saleId) updatedSale else s];
+      }
+
       for (final item in sale.items) {
         await ref.read(productsFutureProvider.notifier).updateStock(
           item.product.id, 
@@ -144,12 +180,6 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
           referenceId: sale.id,
         );
       }
-      
-      // Notify session listeners
-      state = [
-        for (final s in state)
-          if (s.id == saleId) updatedSale else s
-      ];
     } catch (e) {
       debugPrint('Verify Sale Error: $e');
     }
@@ -157,27 +187,71 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
 
   Future<void> updateSale(SaleRecord updatedSale) async {
     try {
-      await _service.updateSale(updatedSale);
-      // NOTE: Stock is NOT automatically returned on cancellation or rectification 
-      // to ensure stock only increases via verified transfers or manual admin overrides.
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateSale(updatedSale);
+      } else {
+        await OfflineSyncService.addToQueue(
+          actionType: 'SALE',
+          data: updatedSale.toJson(),
+        );
+        state = [for (final s in state) if (s.id == updatedSale.id) updatedSale else s];
+      }
+      
+      // Auto-Register Debtor if update created a debt
+      _ensureCustomerRegistered(updatedSale);
     } catch (e) {
       debugPrint('Update Sale Error: $e');
     }
   }
 
+  void _ensureCustomerRegistered(SaleRecord sale) {
+    if (sale.balance > 0.01 && sale.customerPhone != null) {
+      final customers = ref.read(customerProvider);
+      final exists = customers.any((c) => c.phone == sale.customerPhone);
+      
+      if (!exists) {
+        final newCustomer = Customer(
+          id: UuidUtils.generate(),
+          branchCode: sale.branchCode,
+          name: sale.customerName ?? 'Walk-in Debtor',
+          phone: sale.customerPhone!,
+          location: 'Auto-added from Debt Sale',
+        );
+        // addCustomer is optimistic and non-blocking
+        ref.read(customerProvider.notifier).addCustomer(newCustomer);
+      }
+    }
+  }
+
   Future<void> deleteSales(List<String> ids) async {
     try {
-      await _service.deleteSales(ids);
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.deleteSales(ids);
+      } else {
+        for (final id in ids) {
+          await OfflineSyncService.addToQueue(
+            actionType: 'DELETE_SALE',
+            data: {'id': id},
+          );
+        }
+        state = state.where((s) => !ids.contains(s.id)).toList();
+      }
     } catch (e) {
       debugPrint('Delete Sales Error: $e');
-      rethrow;
     }
   }
 
   Future<void> purgeAllRecords() async {
     try {
       final ids = state.map((s) => s.id).toList();
-      await _service.deleteSales(ids);
+      for (final id in ids) {
+        await OfflineSyncService.addToQueue(
+          actionType: 'DELETE_SALE',
+          data: {'id': id},
+        );
+      }
       state = [];
     } catch (e) {
       debugPrint('Purge Sales Error: $e');

@@ -11,6 +11,7 @@ import '../../services/customer_provider.dart';
 import '../../models/customer_model.dart';
 import '../../services/menu_service.dart';
 import '../../services/user_provider.dart';
+import '../../core/uuid_utils.dart';
 import '../../models/customer_metrics.dart';
 import '../../services/customer_metrics_provider.dart';
 
@@ -270,12 +271,15 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                         onSelected: (val) {
                           if (val == 'fav') {
                             ref.read(customerProvider.notifier).toggleFavorite(c.id);
+                          } else if (val == 'edit') {
+                            _showEditCustomerDialog(context, ref, c);
                           } else if (val == 'del') {
-                            ref.read(customerProvider.notifier).deleteCustomer(c.id);
+                            _confirmDeleteCustomer(context, ref, c);
                           }
                         },
                         itemBuilder: (context) => [
                           PopupMenuItem(value: 'fav', child: Text(c.isFavorite ? 'Remove Favorite' : 'Mark as Favorite')),
+                          const PopupMenuItem(value: 'edit', child: Text('Edit Details')),
                           const PopupMenuItem(value: 'del', child: Text('Delete Record', style: TextStyle(color: Colors.red))),
                         ],
                       ),
@@ -295,6 +299,8 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                               _buildMetricRow(Icons.shopping_bag_outlined, 'Orders: ${m?.visitCount ?? 0}', theme),
                               const SizedBox(height: 4),
                               _buildMetricRow(Icons.payments_outlined, 'Spent: GHC${m?.totalSpend.toStringAsFixed(2) ?? '0.00'}', theme),
+                              const SizedBox(height: 4),
+                              _buildMetricRow(Icons.money_off_outlined, 'Debt: GHC${m?.totalDebt.toStringAsFixed(2) ?? '0.00'}', theme, color: (m?.totalDebt ?? 0) > 0.01 ? Colors.red : null),
                             ],
                           ),
                         ),
@@ -333,21 +339,144 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
     });
   }
 
-  Widget _buildMetricRow(IconData icon, String text, ThemeData theme) {
+  Widget _buildMetricRow(IconData icon, String text, ThemeData theme, {Color? color}) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 12, color: theme.colorScheme.onSurfaceVariant),
+        Icon(icon, size: 12, color: color ?? theme.colorScheme.onSurfaceVariant),
         const SizedBox(width: 6),
         Flexible(
           child: Text(
             text, 
-            style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
+            style: TextStyle(fontSize: 11, color: color ?? theme.colorScheme.onSurfaceVariant, fontWeight: color != null ? FontWeight.bold : FontWeight.normal),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
         ),
       ],
+    );
+  }
+
+  void _confirmDeleteCustomer(BuildContext context, WidgetRef ref, Customer customer) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Customer?'),
+        content: Text('Are you sure you want to remove ${customer.name} from the directory? This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              await ref.read(customerProvider.notifier).deleteCustomer(customer.id);
+              if (context.mounted) Navigator.pop(context);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('${customer.name} deleted successfully.'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditCustomerDialog(BuildContext context, WidgetRef ref, Customer customer) {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController(text: customer.name);
+    final phoneController = TextEditingController(text: customer.phone);
+    final locationController = TextEditingController(text: customer.location ?? '');
+    bool isFavorite = customer.isFavorite;
+    final theme = Theme.of(context);
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+          title: Text('Edit Customer: ${customer.name}'),
+          content: SingleChildScrollView(
+            child: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameController, 
+                    decoration: const InputDecoration(labelText: 'Full Name', prefixIcon: Icon(Icons.person_outline)),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z\s]'))],
+                    validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: phoneController, 
+                    decoration: const InputDecoration(labelText: 'Phone Number', hintText: '10 digits', prefixIcon: Icon(Icons.phone_outlined)), 
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
+                    ],
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return 'Required';
+                      if (v.length != 10) return 'Exactly 10 digits required';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: locationController, 
+                    decoration: const InputDecoration(labelText: 'Location / Address', prefixIcon: Icon(Icons.location_on_outlined)),
+                  ),
+                  const SizedBox(height: 16),
+                  CheckboxListTile(
+                    title: const Text('Mark as Favorite'),
+                    subtitle: const Text('Highlighted in directory'),
+                    value: isFavorite,
+                    onChanged: (val) => setState(() => isFavorite = val ?? false),
+                    activeColor: theme.colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant))),
+            ElevatedButton(
+              onPressed: () async {
+                if (formKey.currentState!.validate()) {
+                  final updatedCustomer = customer.copyWith(
+                    name: nameController.text.trim(),
+                    phone: phoneController.text.trim(),
+                    location: locationController.text.trim().isEmpty ? null : locationController.text.trim(),
+                    isFavorite: isFavorite,
+                  );
+                  
+                  try {
+                    await ref.read(customerProvider.notifier).updateCustomer(updatedCustomer);
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Customer details updated!'), backgroundColor: Colors.green),
+                      );
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error updating customer: $e'), backgroundColor: Colors.red),
+                      );
+                    }
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, foregroundColor: Colors.white),
+              child: const Text('Save Changes'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -415,9 +544,7 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
             ElevatedButton(
               onPressed: () async {
                 if (formKey.currentState!.validate()) {
-                  final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-                  final String suffix = timestamp.substring(timestamp.length - 12);
-                  final String uniqueUuid = 'cccccccc-cccc-cccc-cccc-$suffix';
+                  final String uniqueUuid = UuidUtils.generate();
 
                   final newCustomer = Customer(
                     id: uniqueUuid,

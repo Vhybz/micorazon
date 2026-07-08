@@ -54,4 +54,21 @@ class SupabaseCustomerService {
   Future<void> deleteCustomer(String id) async {
     await _client.from('customers').delete().eq('id', id);
   }
+
+  Stream<List<Customer>> watchCustomers(String branchCode) {
+    if (branchCode.isNotEmpty) {
+      return _client
+          .from('customers')
+          .stream(primaryKey: ['id'])
+          .eq('branch_code', branchCode)
+          .order('name', ascending: true)
+          .map((data) => data.map((json) => Customer.fromJson(json)).where((c) => !c.isDeleted).toList());
+    }
+
+    return _client
+        .from('customers')
+        .stream(primaryKey: ['id'])
+        .order('name', ascending: true)
+        .map((data) => data.map((json) => Customer.fromJson(json)).where((c) => !c.isDeleted).toList());
+  }
 }

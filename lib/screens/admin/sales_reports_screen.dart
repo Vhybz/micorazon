@@ -124,12 +124,20 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     color: theme.cardTheme.color,
                     child: TabBar(
                       controller: _tabController,
+                      isScrollable: !isDesktop,
+                      tabAlignment: !isDesktop ? TabAlignment.start : null,
                       labelColor: theme.colorScheme.primary,
                       unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
                       indicatorColor: theme.colorScheme.primary,
-                      tabs: const [
-                        Tab(text: 'Analytics Overview', icon: Icon(Icons.analytics_outlined)),
-                        Tab(text: 'Transaction Logs', icon: Icon(Icons.list_alt_rounded)),
+                      tabs: [
+                        Tab(
+                          text: isDesktop ? 'Analytics Overview' : 'Analytics', 
+                          icon: const Icon(Icons.analytics_outlined)
+                        ),
+                        Tab(
+                          text: isDesktop ? 'Transaction Logs' : 'Logs', 
+                          icon: const Icon(Icons.list_alt_rounded)
+                        ),
                       ],
                     ),
                   ),
@@ -588,25 +596,23 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     return LayoutBuilder(builder: (context, constraints) {
       final isMobile = constraints.maxWidth < 600;
       
-      final headerText = Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              'Transaction History',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-            Text(
-              'Detailed breakdown of all shop revenue (${filteredSales.length} items)',
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          ],
-        ),
+      final headerContent = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Transaction History',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+          Text(
+            'Detailed breakdown of all shop revenue (${filteredSales.length} items)',
+            style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        ],
       );
 
       final exportButton = ElevatedButton.icon(
@@ -662,7 +668,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            headerText,
+            headerContent,
             const SizedBox(height: AppSpacing.m),
             if (deleteSelectedButton != null) ...[
               SizedBox(width: double.infinity, child: deleteSelectedButton),
@@ -680,7 +686,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(child: headerText),
+          Expanded(child: headerContent),
           const SizedBox(width: 16),
           if (deleteSelectedButton != null) ...[
             deleteSelectedButton,
@@ -779,126 +785,238 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     if (user == null) return const SizedBox.shrink();
     final isDark = theme.brightness == Brightness.dark;
 
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(AppRadius.m),
-        boxShadow: [
-          if (!isDark) BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10)
-        ],
-        border: isDark ? Border.all(color: theme.dividerColor) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.l),
-            child: Text('Transactions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface)),
-          ),
-          if (sales.isEmpty)
-            const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.xl), child: Text('No transactions found.')))
-          else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 800),
-                child: DataTable(
-                  columnSpacing: 24,
-                  horizontalMargin: 12,
-                  showCheckboxColumn: true,
-                  onSelectAll: (selected) {
-                    setState(() {
-                      if (selected == true) {
-                        _selectedSaleIds.addAll(sales.map((s) => s.id));
-                      } else {
-                        _selectedSaleIds.clear();
-                      }
-                    });
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool isMobile = constraints.maxWidth < 600;
+
+        if (isMobile) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpacing.m),
+                child: Text('Transactions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface)),
+              ),
+              if (sales.isEmpty)
+                const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.xl), child: Text('No transactions found.')))
+              else
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: sales.length,
+                  itemBuilder: (context, index) {
+                    final sale = sales[index];
+                    final isDebt = sale.balance > 0.01;
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: AppSpacing.m),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.m),
+                        side: isDebt ? const BorderSide(color: Colors.red, width: 1) : BorderSide.none,
+                      ),
+                      child: ListTile(
+                        onTap: () => _showSaleDetails(context, sale),
+                        leading: CircleAvatar(
+                          backgroundColor: _getStatusColor(sale.status).withValues(alpha: 0.1),
+                          child: Icon(Icons.receipt_long, color: _getStatusColor(sale.status), size: 20),
+                        ),
+                        title: Text(sale.id, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(DateFormat('MMM dd, HH:mm').format(sale.timestamp), style: const TextStyle(fontSize: 10)),
+                            Text('Cust: ${sale.customerName ?? "Walk-in"}', style: const TextStyle(fontSize: 11)),
+                          ],
+                        ),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text('₵${sale.totalAmount.toStringAsFixed(2)}', 
+                              style: TextStyle(fontWeight: FontWeight.bold, color: isDebt ? Colors.red : null)),
+                            if (isDebt)
+                              const Text('DEBT', style: TextStyle(color: Colors.red, fontSize: 8, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ),
+                    );
                   },
-                  headingTextStyle: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary, fontSize: 12),
-                  columns: const [
-                    DataColumn(label: Text('Invoice ID')),
-                    DataColumn(label: Text('Date & Time')),
-                    DataColumn(label: Text('Customer')),
-                    DataColumn(label: Text('Sold By')),
-                    DataColumn(label: Text('Total')),
-                    DataColumn(label: Text('Status')),
-                  ],
-                  rows: sales.map<DataRow>((sale) {
-                    final isSelected = _selectedSaleIds.contains(sale.id);
-                    return DataRow(
-                      selected: isSelected,
-                      onSelectChanged: (selected) {
+                ),
+            ],
+          );
+        }
+
+        return Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: theme.cardTheme.color,
+            borderRadius: BorderRadius.circular(AppRadius.m),
+            boxShadow: [
+              if (!isDark) BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10)
+            ],
+            border: isDark ? Border.all(color: theme.dividerColor) : null,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.l),
+                child: Text('Transactions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface)),
+              ),
+              if (sales.isEmpty)
+                const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.xl), child: Text('No transactions found.')))
+              else
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 800),
+                    child: DataTable(
+                      columnSpacing: 24,
+                      horizontalMargin: 12,
+                      showCheckboxColumn: true,
+                      onSelectAll: (selected) {
                         setState(() {
                           if (selected == true) {
-                            _selectedSaleIds.add(sale.id);
+                            _selectedSaleIds.addAll(sales.map((s) => s.id));
                           } else {
-                            _selectedSaleIds.remove(sale.id);
+                            _selectedSaleIds.clear();
                           }
                         });
                       },
-                      onLongPress: () => _showSaleDetails(context, sale),
-                      cells: [
-                        DataCell(
-                          InkWell(
-                            onTap: () => _showSaleDetails(context, sale),
-                            child: Row(
+                      headingTextStyle: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary, fontSize: 12),
+                      columns: const [
+                        DataColumn(label: Text('Invoice ID')),
+                        DataColumn(label: Text('Date & Time')),
+                        DataColumn(label: Text('Customer')),
+                        DataColumn(label: Text('Sold By')),
+                        DataColumn(label: Text('Total')),
+                        DataColumn(label: Text('Status')),
+                      ],
+                      rows: sales.map<DataRow>((sale) {
+                        final isSelected = _selectedSaleIds.contains(sale.id);
+                        final isDebt = sale.balance > 0.01;
+                        return DataRow(
+                          selected: isSelected,
+                          color: WidgetStateProperty.resolveWith<Color?>((states) {
+                            if (isDebt && !isSelected) return Colors.red.withValues(alpha: 0.03);
+                            return null;
+                          }),
+                          onSelectChanged: (selected) {
+                            setState(() {
+                              if (selected == true) {
+                                _selectedSaleIds.add(sale.id);
+                              } else {
+                                _selectedSaleIds.remove(sale.id);
+                              }
+                            });
+                          },
+                          onLongPress: () => _showSaleDetails(context, sale),
+                          cells: [
+                            DataCell(
+                              InkWell(
+                                onTap: () => _showSaleDetails(context, sale),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (sale.isVerified)
+                                       const Icon(Icons.verified, color: Colors.blue, size: 14),
+                                    if (sale.isVerified)
+                                       const SizedBox(width: 4),
+                                    Text(sale.id, style: TextStyle(
+                                      fontWeight: FontWeight.bold, 
+                                      decoration: TextDecoration.underline,
+                                      color: isDebt ? Colors.red.shade900 : null,
+                                    )),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            DataCell(Text(DateFormat('MMM dd, HH:mm:ss').format(sale.timestamp), 
+                              style: TextStyle(color: isDebt ? Colors.red.shade900 : null))),
+                            DataCell(
+                              SizedBox(
+                                width: 100,
+                                child: Text(
+                                  sale.customerName ?? 'Walk-in',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: isDebt ? Colors.red.shade900 : null,
+                                    fontWeight: isDebt ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              SizedBox(
+                                width: 100,
+                                child: Text(
+                                  sale.cashierName,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(fontSize: 12, color: isDebt ? Colors.red.shade900 : null),
+                                ),
+                              ),
+                            ),
+                            DataCell(
+                              Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('₵ ${sale.totalAmount.toStringAsFixed(2)}', 
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold, 
+                                      color: isDebt ? Colors.red : null
+                                    )
+                                  ),
+                                  if (isDebt)
+                                    Text('Balance: ₵${sale.balance.toStringAsFixed(2)}', 
+                                      style: const TextStyle(fontSize: 9, color: Colors.red, fontWeight: FontWeight.bold)
+                                    ),
+                                ],
+                              )
+                            ),
+                            DataCell(Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                if (sale.isVerified)
-                                   const Icon(Icons.verified, color: Colors.blue, size: 14),
-                                if (sale.isVerified)
-                                   const SizedBox(width: 4),
-                                Text(sale.id, style: const TextStyle(fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _getStatusColor(sale.status).withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    sale.status.name.toUpperCase(),
+                                    style: TextStyle(
+                                      color: _getStatusColor(sale.status),
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                if (isDebt) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'DEBT',
+                                      style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
                               ],
-                            ),
-                          ),
-                        ),
-                        DataCell(Text(DateFormat('MMM dd, HH:mm:ss').format(sale.timestamp))),
-                        DataCell(
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              sale.customerName ?? 'Walk-in',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ),
-                        DataCell(
-                          SizedBox(
-                            width: 100,
-                            child: Text(
-                              sale.cashierName,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                          ),
-                        ),
-                        DataCell(Text('₵ ${sale.totalAmount.toStringAsFixed(2)}')),
-                        DataCell(Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _getStatusColor(sale.status).withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            sale.status.name.toUpperCase(),
-                            style: TextStyle(
-                              color: _getStatusColor(sale.status),
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        )),
-                      ],
-                    );
-                  }).toList(),
+                            )),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-        ],
-      ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -927,17 +1045,25 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.l)),
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.receipt_long, color: Colors.white),
-                            const SizedBox(width: AppSpacing.m),
-                            Text(
-                              'Transaction ${sale.id}',
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                          ],
+                        const Icon(Icons.receipt_long, color: Colors.white),
+                        const SizedBox(width: AppSpacing.m),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Transaction Details',
+                                style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                sale.id,
+                                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
                         ),
                         IconButton(
                           icon: const Icon(Icons.close, color: Colors.white70),
@@ -960,10 +1086,13 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text('CASHIER', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                                    Text('${sale.cashierName} (${sale.cashierId})', 
-                                      style: const TextStyle(fontSize: 13),
-                                      maxLines: 2,
+                                    Text(sale.cashierName, 
+                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                                      maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
+                                    ),
+                                    Text('ID: ${sale.cashierId.substring(0, 8).toUpperCase()}', 
+                                      style: TextStyle(fontSize: 9, color: theme.colorScheme.onSurfaceVariant),
                                     ),
                                   ],
                                 ),
@@ -973,7 +1102,8 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text('DATE', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                                  Text(DateFormat('MMM dd, HH:mm').format(sale.timestamp), style: const TextStyle(fontSize: 13)),
+                                  Text(DateFormat('MMM dd').format(sale.timestamp), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                  Text(DateFormat('HH:mm').format(sale.timestamp), style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
                                 ],
                               ),
                             ],
@@ -1009,7 +1139,11 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                             ),
                           )),
                           const Divider(height: 32),
-                          _detailRow(context, 'NET INVOICE VALUE', '₵${sale.netInvoiceValue.toStringAsFixed(2)}', isBold: true, color: theme.colorScheme.primary),
+                          _detailRow(context, 'NET INVOICE VALUE', '₵${sale.netInvoiceValue.toStringAsFixed(2)}', 
+                            isBold: true, color: sale.balance > 0.01 ? Colors.red : theme.colorScheme.primary),
+                          if (sale.balance > 0.01)
+                            _detailRow(context, 'OUTSTANDING BALANCE', '₵${sale.balance.toStringAsFixed(2)}', 
+                              isBold: true, color: Colors.red),
                           const Divider(height: 32),
                           Text('PAYMENTS', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),

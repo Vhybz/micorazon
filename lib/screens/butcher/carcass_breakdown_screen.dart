@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
 import '../../models/butcher_models.dart';
 import '../../services/butcher_service.dart';
+import '../../core/uuid_utils.dart';
 import '../../services/butcher_navigation_provider.dart';
 import '../../services/label_service.dart';
-import '../../widgets/responsive_layout.dart';
 
 class CarcassBreakdownScreen extends ConsumerStatefulWidget {
   const CarcassBreakdownScreen({super.key});
@@ -16,6 +17,7 @@ class CarcassBreakdownScreen extends ConsumerStatefulWidget {
 
 class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen> {
   final Map<String, TextEditingController> _controllers = {};
+  final Map<String, String> _units = {}; // Added to track 'kg' vs 'Qty'
   final TextEditingController _wasteController = TextEditingController();
   bool _isSaving = false;
   String? _errorMessage;
@@ -28,6 +30,7 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
     if (log != null) {
       for (var cut in log.type.standardCuts) {
         _controllers[cut] = TextEditingController();
+        _units[cut] = 'kg'; // Default unit
         _controllers[cut]!.addListener(_calculateTotals);
       }
       _wasteController.addListener(_calculateTotals);
@@ -36,8 +39,11 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
 
   void _calculateTotals() {
     double sum = 0;
-    _controllers.forEach((_, controller) {
-      sum += double.tryParse(controller.text) ?? 0;
+    _controllers.forEach((name, controller) {
+      // Only count 'kg' units towards the weight balance
+      if (_units[name] == 'kg') {
+        sum += double.tryParse(controller.text) ?? 0;
+      }
     });
     final waste = double.tryParse(_wasteController.text) ?? 0;
     
@@ -274,6 +280,8 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
   }
 
   Widget _buildCutInput(String name) {
+    final bool isQty = _units[name] == 'Qty';
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -285,18 +293,49 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(name, 
+                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold), 
+                  maxLines: 1, 
+                  overflow: TextOverflow.ellipsis
+                ),
+              ),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _units[name] = isQty ? 'kg' : 'Qty';
+                    _calculateTotals();
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isQty ? Colors.blue.shade50 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: isQty ? Colors.blue.shade200 : Colors.grey.shade300),
+                  ),
+                  child: Text(isQty ? 'Qty' : 'kg', 
+                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: isQty ? Colors.blue : Colors.grey.shade700)
+                  ),
+                ),
+              ),
+            ],
+          ),
           const Spacer(),
           TextField(
             controller: _controllers[name],
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               isDense: true,
               contentPadding: EdgeInsets.zero,
               border: InputBorder.none,
-              suffixText: 'kg',
-              suffixStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.grey),
+              suffixText: isQty ? ' units' : ' kg',
+              suffixStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.normal, color: Colors.grey),
               hintText: '0.0',
             ),
           ),
@@ -325,7 +364,7 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('SLAUGHTER WASTE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                Text('Bones, hides, and non-sellable parts', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                Text('Bones, hides, etc. (Optional)', style: TextStyle(fontSize: 11, color: Colors.grey)),
               ],
             ),
           ),
@@ -334,6 +373,7 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
             child: TextField(
               controller: _wasteController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
               textAlign: TextAlign.right,
               style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange),
               decoration: const InputDecoration(
@@ -379,58 +419,64 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
     final log = ref.read(activeSlaughterLogProvider);
     if (log == null) return;
 
-    // 1. Validation
-    bool allFilled = true;
-    _controllers.forEach((_, c) { if (c.text.isEmpty) allFilled = false; });
-    if (_wasteController.text.isEmpty) allFilled = false;
+    final remaining = log.meatWeight - _totalAccounted;
+    final bool isDone = remaining.abs() < 0.1;
 
-    if (!allFilled) {
-      setState(() => _errorMessage = 'Please provide weights for all parts and waste.');
-      return;
+    // 1. Validation - If not "Green", check if all cuts are filled. 
+    // If "Green", we can proceed even with some empty fields.
+    if (!isDone) {
+      bool cutsFilled = true;
+      _controllers.forEach((cut, c) { 
+        if (c.text.isEmpty) cutsFilled = false; 
+      });
+
+      if (!cutsFilled) {
+        setState(() => _errorMessage = 'The expected weight has not been reached. Please fill in all cuts or balance the weights.');
+        return;
+      }
     }
 
     setState(() => _isSaving = true);
     try {
       final List<MeatCut> meatCuts = [];
       final now = DateTime.now();
-      final waste = double.tryParse(_wasteController.text) ?? 0;
+      final waste = double.tryParse(_wasteController.text) ?? 0.0;
       double totalCarcassWeight = 0;
 
       _controllers.forEach((cutName, controller) {
-        final weight = double.tryParse(controller.text) ?? 0;
-        totalCarcassWeight += weight;
+        final val = double.tryParse(controller.text) ?? 0;
+        if (_units[cutName] == 'kg') {
+          totalCarcassWeight += val;
+        }
       });
 
-      // Validation: Carcass weight vs Intake Meat Weight Estimate
-      if (totalCarcassWeight > log.meatWeight) {
+      // Validation: Carcass weight vs Intake Meat Weight Estimate (Only for kg items)
+      if (totalCarcassWeight > (log.meatWeight + 0.5)) { // Allow a tiny buffer
         setState(() {
           _isSaving = false;
-          _errorMessage = 'Total sellable parts (${totalCarcassWeight.toStringAsFixed(1)}kg) exceed the intake meat estimate (${log.meatWeight.toStringAsFixed(1)}kg).';
+          _errorMessage = 'Total accounted weight (${totalCarcassWeight.toStringAsFixed(1)}kg) exceeds the intake meat estimate (${log.meatWeight.toStringAsFixed(1)}kg).';
         });
         return;
       }
 
-      if (totalCarcassWeight < (log.meatWeight * 0.85)) { // Relaxed to 85% for screen version
+      if (!isDone && totalCarcassWeight < (log.meatWeight * 0.85)) { 
         setState(() {
           _isSaving = false;
-          _errorMessage = 'Total parts are too low (less than 85% of intake). Please verify weights.';
+          _errorMessage = 'Total parts weight is too low. Please reach the green target to proceed.';
         });
         return;
       }
 
       _controllers.forEach((cutName, controller) {
-        final weight = double.tryParse(controller.text) ?? 0;
-        if (weight > 0) {
-          final String timestamp = now.millisecondsSinceEpoch.toString();
-          final String suffix = timestamp.substring(timestamp.length - 10);
-          final String indexStr = meatCuts.length.toString().padLeft(2, '0');
-          
+        final value = double.tryParse(controller.text) ?? 0;
+        if (value > 0) {
           meatCuts.add(MeatCut(
-            id: '00000000-0000-0000-0000-$suffix$indexStr',
+            id: UuidUtils.generate(),
             name: cutName,
             meatType: log.type.displayName,
             batchId: log.id,
-            weight: weight,
+            weight: value,
+            unit: _units[cutName] ?? 'kg',
             processedAt: now,
           ));
         }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/user_model.dart';
 import 'supabase_user_service.dart';
 import 'sms_service.dart';
@@ -8,9 +9,42 @@ import 'sms_service.dart';
 class UserNotifier extends StateNotifier<List<UserAccount>> {
   final SupabaseUserService service;
   final Ref ref;
+  StreamSubscription? _subscription;
+  bool _isLoading = false;
+  bool get isLoading => _isLoading;
 
   UserNotifier(this.service, this.ref) : super([]) {
+    _init();
+  }
+
+  void _init() {
     _startHeartbeat();
+    _startSubscription();
+  }
+
+  void _startSubscription() {
+    _subscription?.cancel();
+    _subscription = service.watchUsers().listen((users) {
+      final currentUser = ref.read(sessionUserProfileProvider);
+      List<UserAccount> filteredUsers = users;
+      
+      if (currentUser?.role != UserRole.superAdmin && currentUser?.branchCode != null) {
+        filteredUsers = users.where((u) => u.branchCode == currentUser!.branchCode).toList();
+      }
+      
+      state = filteredUsers;
+      
+      // Update session profile if current user is in the list
+      final currentId = ref.read(currentUserIdProvider);
+      if (currentId != null) {
+        final me = users.where((u) => u.id == currentId).firstOrNull;
+        if (me != null) {
+          ref.read(sessionUserProfileProvider.notifier).state = me;
+        }
+      }
+    }, onError: (e) {
+      debugPrint('User Stream Error: $e');
+    });
   }
 
   void _startHeartbeat() {
@@ -57,7 +91,14 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
   }
 
   Future<void> loadUsers({bool silent = false}) async {
+    if (_isLoading) return;
     try {
+      if (!silent) {
+        _isLoading = true;
+        // Notify UI about loading state via a dedicated provider
+        Future.microtask(() => ref.read(userLoadingProvider.notifier).state = true);
+      }
+      
       final currentId = ref.read(currentUserIdProvider);
       if (currentId == null) return;
 
@@ -66,7 +107,7 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
       // Update session profile only if it changed to avoid unnecessary rebuilds
       if (currentUser != null) {
         final existing = ref.read(sessionUserProfileProvider);
-        if (existing == null || existing.toJson().toString() != currentUser.toJson().toString()) {
+        if (existing == null || existing.id != currentUser.id || existing.lastSeen != currentUser.lastSeen) {
           ref.read(sessionUserProfileProvider.notifier).state = currentUser;
         }
       }
@@ -78,12 +119,17 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
         filteredUsers = allUsers.where((u) => u.branchCode == currentUser!.branchCode).toList();
       }
       
-      // Update state only if list changed
-      if (state.length != filteredUsers.length || state.toString() != filteredUsers.toString()) {
-         state = filteredUsers;
-      }
+      // Update state if the list is different. 
+      // We use reference equality check for simplicity, or we could do a better check.
+      // Simply assigning it will trigger listeners.
+      state = filteredUsers;
     } catch (e) {
       debugPrint('Load Users Error: $e');
+    } finally {
+      _isLoading = false;
+      if (!silent) {
+        Future.microtask(() => ref.read(userLoadingProvider.notifier).state = false);
+      }
     }
   }
 
@@ -112,8 +158,13 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
           branchCode: branchCode,
         );
         
-        _updateLocalAndSession(updatedUser); // Instant UI Update
-        await service.updateUser(updatedUser);
+        final connectivity = await Connectivity().checkConnectivity();
+        if (!connectivity.contains(ConnectivityResult.none)) {
+          await service.updateUser(updatedUser);
+        } else {
+          _updateLocalAndSession(updatedUser);
+          await service.updateUser(updatedUser); 
+        }
       }
     } catch (e) {
       debugPrint('Profile Update Error: $e');
@@ -167,23 +218,22 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
 
   Future<void> deleteUser(String userId) async {
     try {
+      // 1. Attempt absolute hard delete (wipes from database)
       await service.hardDeleteUser(userId);
+      
+      // 2. Remove from local list
       state = state.where((u) => u.id != userId).toList();
     } catch (e) {
-      debugPrint('Delete User Error: $e');
-    }
-  }
-
-  Future<void> restoreUser(String userId) async {
-    try {
-      final user = await _getUser(userId);
-      if (user != null) {
-        final updatedUser = user.copyWith(isDeleted: false);
-        _updateLocalAndSession(updatedUser);
-        await service.updateUser(updatedUser);
+      debugPrint('Hard Delete failed, attempting Ghost Delete fallback: $e');
+      try {
+        // Fallback: If hard delete fails (usually due to sales history),
+        // we use a "Ghost Delete" where we mark it as deleted and hide it everywhere.
+        await service.deleteUser(userId); // Sets is_deleted = true
+        state = state.where((u) => u.id != userId).toList();
+      } catch (innerErr) {
+        debugPrint('Ghost Delete fallback failed: $innerErr');
+        rethrow;
       }
-    } catch (e) {
-      debugPrint('Restore User Error: $e');
     }
   }
 
@@ -216,20 +266,39 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
     }
   }
 
-  Future<void> updateSalary(String userId, {double? amount, int? day, DateTime? lastPaid}) async {
+  Future<void> updateSalary(String userId, {double? amount, int? day, DateTime? lastPaid, bool? isAdvance}) async {
     try {
       final user = await _getUser(userId);
       if (user != null) {
+        // We still update the local state so the UI looks correct
         final updatedUser = user.copyWith(
           salaryAmount: amount,
           salaryDay: day,
           lastSalaryDate: lastPaid,
+          lastPaymentWasAdvance: isAdvance,
         );
+        
         _updateLocalAndSession(updatedUser);
-        await service.updateUser(updatedUser);
+        
+        // We only send columns that Supabase API definitely recognizes
+        final Map<String, dynamic> updates = {
+          'salary_amount': amount,
+          'salary_day': day,
+        };
+        
+        if (lastPaid != null) {
+          updates['last_salary_date'] = "${lastPaid.year}-${lastPaid.month.toString().padLeft(2, '0')}-${lastPaid.day.toString().padLeft(2, '0')}";
+        }
+        
+        if (isAdvance != null) {
+          updates['last_payment_was_advance'] = isAdvance;
+        }
+
+        await service.updateUserFields(userId, updates);
       }
     } catch (e) {
       debugPrint('Update Salary Error: $e');
+      rethrow;
     }
   }
 
@@ -338,15 +407,6 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
     }
   }
 
-  Future<void> permanentlyDeleteUser(String userId) async {
-    try {
-      await service.hardDeleteUser(userId);
-      state = state.where((u) => u.id != userId).toList();
-    } catch (e) {
-      debugPrint('Delete Error: $e');
-    }
-  }
-
   Future<UserAccount?> fetchUserById(String id) async {
     try {
       final user = await service.getUserById(id);
@@ -439,6 +499,8 @@ final currentUserProvider = Provider<UserAccount?>((ref) {
 final userProvider = StateNotifierProvider<UserNotifier, List<UserAccount>>((ref) {
   return UserNotifier(ref.watch(userServiceProvider), ref);
 });
+
+final userLoadingProvider = StateProvider<bool>((ref) => false);
 
 /// A heartbeat provider that triggers every 3 seconds to keep things "live"
 final liveHeartbeatProvider = StreamProvider<int>((ref) {

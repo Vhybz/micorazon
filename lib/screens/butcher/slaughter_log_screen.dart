@@ -42,13 +42,19 @@ class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
                   }).toList();
 
                   if (filteredLogs.isEmpty) {
-                    return const Center(
+                    return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.search_off, size: 48, color: AppColors.textLight),
-                          SizedBox(height: AppSpacing.m),
-                          Text('No logs found matching your criteria', style: TextStyle(color: AppColors.textLight)),
+                          const SizedBox(height: AppSpacing.m),
+                          Text('No logs found matching your criteria', style: const TextStyle(color: AppColors.textLight)),
+                          const SizedBox(height: 8),
+                          TextButton.icon(
+                            onPressed: () => ref.read(slaughterLogsProvider.notifier).loadLogs(),
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Refresh Now'),
+                          ),
                         ],
                       ),
                     );

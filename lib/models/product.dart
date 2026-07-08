@@ -14,11 +14,12 @@ class PriceBracket {
     required this.price
   });
 
-  factory PriceBracket.fromJson(Map<String, dynamic> json) {
+  factory PriceBracket.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return PriceBracket(
-      minWeight: (json['minWeight'] as num).toDouble(),
-      maxWeight: (json['maxWeight'] as num).toDouble(),
-      price: (json['price'] as num).toDouble(),
+      minWeight: (map['minWeight'] as num).toDouble(),
+      maxWeight: (map['maxWeight'] as num).toDouble(),
+      price: (map['price'] as num).toDouble(),
     );
   }
 
@@ -171,33 +172,34 @@ class Product {
     );
   }
 
-  factory Product.fromJson(Map<String, dynamic> json) {
+  factory Product.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return Product(
-      id: json['id'] as String,
-      branchCode: json['branch_code'],
-      name: json['name'] as String,
-      retailPrice: (json['retail_price'] as num).toDouble(),
-      wholesalePrice: (json['wholesale_price'] as num).toDouble(),
-      costPrice: (json['cost_price'] as num? ?? 0).toDouble(),
-      retailBrackets: (json['retail_brackets'] as List?)
+      id: map['id'] as String,
+      branchCode: map['branch_code'],
+      name: map['name'] as String,
+      retailPrice: (map['retail_price'] as num).toDouble(),
+      wholesalePrice: (map['wholesale_price'] as num).toDouble(),
+      costPrice: (map['cost_price'] as num? ?? 0).toDouble(),
+      retailBrackets: (map['retail_brackets'] as List?)
           ?.map((e) => PriceBracket.fromJson(e))
           .toList(),
-      wholesaleBrackets: (json['wholesale_brackets'] as List?)
+      wholesaleBrackets: (map['wholesale_brackets'] as List?)
           ?.map((e) => PriceBracket.fromJson(e))
           .toList(),
-      imageUrl: json['image_url'] as String? ?? '',
-      category: json['category'] as String,
-      stockQuantity: (json['stock_quantity'] as num? ?? 0).toDouble(),
-      unit: json['unit'] as String? ?? 'kg',
-      discountPercentage: (json['discount_percentage'] as num? ?? 0.0).toDouble(),
-      promoStartDate: json['promo_start'] != null ? DateTime.parse(json['promo_start']) : null,
-      promoEndDate: json['promo_end'] != null ? DateTime.parse(json['promo_end']) : null,
-      promoTarget: PromoTarget.values.byName(json['promo_target'] ?? 'both'),
-      promoCustomerTarget: PromoCustomerTarget.values.byName(json['promo_customer_target'] ?? 'all'),
-      isDeleted: json['is_deleted'] ?? false,
-      lowStockThreshold: (json['low_stock_threshold'] as num? ?? 5.0).toDouble(),
-      dailyStockAdded: (json['daily_stock_added'] as num? ?? 0.0).toDouble(),
-      lastStockUpdate: json['last_stock_update'] != null ? DateTime.parse(json['last_stock_update']) : null,
+      imageUrl: map['image_url'] as String? ?? '',
+      category: map['category'] as String,
+      stockQuantity: (map['stock_quantity'] as num? ?? 0).toDouble(),
+      unit: map['unit'] as String? ?? 'kg',
+      discountPercentage: (map['discount_percentage'] as num? ?? 0.0).toDouble(),
+      promoStartDate: map['promo_start'] != null ? DateTime.parse(map['promo_start']) : null,
+      promoEndDate: map['promo_end'] != null ? DateTime.parse(map['promo_end']) : null,
+      promoTarget: PromoTarget.values.byName(map['promo_target'] ?? 'both'),
+      promoCustomerTarget: PromoCustomerTarget.values.byName(map['promo_customer_target'] ?? 'all'),
+      isDeleted: map['is_deleted'] ?? false,
+      lowStockThreshold: (map['low_stock_threshold'] as num? ?? 5.0).toDouble(),
+      dailyStockAdded: (map['daily_stock_added'] as num? ?? 0.0).toDouble(),
+      lastStockUpdate: map['last_stock_update'] != null ? DateTime.parse(map['last_stock_update']) : null,
     );
   }
 

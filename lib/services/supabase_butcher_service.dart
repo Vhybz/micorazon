@@ -96,7 +96,7 @@ class SupabaseButcherService {
         .select()
         .eq('branch_code', branchCode)
         .order('processed_at', ascending: false)
-        .limit(20);
+        .limit(100); // Increased limit to ensure weight calculations for all active batches are accurate
     
     return (response as List).map((json) => MeatCut.fromJson(json)).toList();
   }

@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import '../models/customer_model.dart';
 import 'supabase_customer_service.dart';
 import 'user_provider.dart';
@@ -11,6 +13,7 @@ import 'offline_sync_service.dart';
 class CustomerNotifier extends StateNotifier<List<Customer>> {
   final SupabaseCustomerService _service;
   final Ref ref;
+  StreamSubscription? _subscription;
 
   CustomerNotifier(this._service, this.ref) : super([]) {
     _init();
@@ -18,7 +21,15 @@ class CustomerNotifier extends StateNotifier<List<Customer>> {
 
   void _init() {
     _loadFromCache();
-    loadCustomers();
+    
+    // Watch current user and restart subscription if branch changes
+    ref.listen(currentUserProvider, (previous, next) {
+      if (next?.branchCode != previous?.branchCode) {
+        _startSubscription();
+      }
+    });
+
+    _startSubscription();
   }
 
   void _loadFromCache() {
@@ -48,95 +59,157 @@ class CustomerNotifier extends StateNotifier<List<Customer>> {
     }
   }
 
+  void _startSubscription() {
+    _subscription?.cancel();
+    final user = ref.read(currentUserProvider);
+    final branchCode = user?.branchCode ?? '';
+
+    _subscription = _service.watchCustomers(branchCode).listen((customers) {
+      state = customers;
+      _saveToCache(customers);
+    }, onError: (e) {
+      debugPrint('Customer Stream Error: $e');
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
   Future<void> loadCustomers() async {
-    try {
-      final user = ref.read(currentUserProvider);
-      final customers = await _service.getCustomers(user?.branchCode ?? '');
-      if (state.length != customers.length || state.toString() != customers.toString()) {
-        state = customers;
-        _saveToCache(customers);
-      }
-    } catch (e) {
-      debugPrint('Error loading customers (Offline?): $e');
-    }
+    _startSubscription();
   }
 
   Future<Customer?> addCustomer(Customer customer) async {
-    try {
-      final user = ref.read(currentUserProvider);
-      
-      // Check if already in list to avoid duplicates before saving
-      final existing = state.where((c) => c.phone == customer.phone).firstOrNull;
-      if (existing != null) {
-        debugPrint('Customer with phone ${customer.phone} already exists in local state.');
-        return existing;
-      }
+    final user = ref.read(currentUserProvider);
+    final customerWithBranch = customer.copyWith(branchCode: user?.branchCode);
 
-      final customerWithBranch = customer.copyWith(branchCode: user?.branchCode);
-      
-      // 1. Add to Offline Queue (Hive)
+    // 1. Optimistic Update: Add to local state immediately for instant UI response
+    state = [...state, customerWithBranch];
+    _saveToCache(state);
+
+    // 2. Perform background tasks (Supabase sync & SMS) without blocking the caller
+    _syncCustomerAndNotify(customerWithBranch);
+    
+    return customerWithBranch;
+  }
+
+  /// Internal helper to handle network tasks in the background
+  Future<void> _syncCustomerAndNotify(Customer customer) async {
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        // Try Supabase
+        await _service.addCustomer(customer);
+      } else {
+        // Queue for later if offline
+        await OfflineSyncService.addToQueue(
+          actionType: 'CUSTOMER', 
+          data: customer.toJson(),
+        );
+      }
+    } catch (e) {
+      debugPrint('Customer Sync Background Error: $e');
+      // If Supabase fails for other reasons, ensure it's in the offline queue to try again
       await OfflineSyncService.addToQueue(
         actionType: 'CUSTOMER', 
-        data: customerWithBranch.toJson(),
+        data: customer.toJson(),
       );
-
-      // 2. Optimistic local update
-      state = [...state, customerWithBranch];
-      
-      // 3. (Optional) Send Welcome SMS if online
-      final currentBranch = ref.read(currentBranchProvider);
-      
-      try {
-        await SmsService.sendCustomerWelcomeSms(
-          customerWithBranch.name, 
-          customerWithBranch.phone, 
-          currentBranch?.name
-        );
-      } catch (_) {}
-      
-      return customerWithBranch;
-    } catch (e) {
-      debugPrint('Error adding customer (Queue): $e');
-      rethrow;
     }
+    
+    // Welcome SMS (Fire and forget, don't await)
+    try {
+      final currentBranch = ref.read(currentBranchProvider);
+      SmsService.sendCustomerWelcomeSms(
+        customer.name, 
+        customer.phone, 
+        currentBranch?.name
+      );
+    } catch (_) {}
   }
 
   Future<void> toggleFavorite(String id) async {
     final customer = state.firstWhere((c) => c.id == id);
     final updatedCustomer = customer.copyWith(isFavorite: !customer.isFavorite);
+    
     try {
-      await _service.updateCustomer(updatedCustomer);
-      state = [
-        for (final c in state)
-          if (c.id == id) updatedCustomer else c
-      ];
-    } catch (_) {}
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateCustomer(updatedCustomer);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      await OfflineSyncService.addToQueue(
+        actionType: 'CUSTOMER',
+        data: updatedCustomer.toJson(),
+      );
+      state = [for (final c in state) if (c.id == id) updatedCustomer else c];
+    }
+  }
+
+  Future<void> updateCustomer(Customer customer) async {
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateCustomer(customer);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      await OfflineSyncService.addToQueue(
+        actionType: 'CUSTOMER',
+        data: customer.toJson(),
+      );
+      state = [for (final c in state) if (c.id == customer.id) customer else c];
+    }
   }
 
   Future<void> deleteCustomer(String id) async {
     try {
-      await _service.deleteCustomer(id);
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.deleteCustomer(id);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      await OfflineSyncService.addToQueue(
+        actionType: 'DELETE_CUSTOMER',
+        data: {'id': id},
+      );
       state = state.where((c) => c.id != id).toList();
-    } catch (_) {}
+    }
   }
 
   Future<void> awardLoyaltyPoints(String customerId, double amount) async {
     try {
       final customer = state.firstWhere((c) => c.id == customerId);
-      // Award 1 point per ₵10 spent (customize as needed)
       final pointsEarned = amount / 10.0;
       final updatedCustomer = customer.copyWith(
         loyaltyPoints: customer.loyaltyPoints + pointsEarned,
         visitCount: customer.visitCount + 1,
       );
       
-      await _service.updateCustomer(updatedCustomer);
-      state = [
-        for (final c in state)
-          if (c.id == customerId) updatedCustomer else c
-      ];
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateCustomer(updatedCustomer);
+      } else {
+        throw Exception('Offline');
+      }
     } catch (e) {
-      debugPrint('Error awarding points: $e');
+      final customer = state.firstWhere((c) => c.id == customerId);
+      final updatedCustomer = customer.copyWith(
+        loyaltyPoints: customer.loyaltyPoints + (amount / 10.0),
+        visitCount: customer.visitCount + 1,
+      );
+      await OfflineSyncService.addToQueue(
+        actionType: 'CUSTOMER',
+        data: updatedCustomer.toJson(),
+      );
+      state = [for (final c in state) if (c.id == customerId) updatedCustomer else c];
     }
   }
 }

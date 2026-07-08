@@ -346,10 +346,9 @@ class _SystemSettingsScreenState extends ConsumerState<SystemSettingsScreen> {
   Widget _buildThemeModeToggle(BuildContext context) {
     final theme = Theme.of(context);
     final themeState = ref.watch(themeProvider);
-    final isDark = themeState.mode == ThemeMode.dark;
 
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.l, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.l, vertical: 8),
       leading: Container(
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
@@ -357,17 +356,25 @@ class _SystemSettingsScreenState extends ConsumerState<SystemSettingsScreen> {
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
-          isDark ? Icons.dark_mode_rounded : Icons.light_mode_rounded, 
+          themeState.mode == ThemeMode.dark ? Icons.dark_mode_rounded : Icons.light_mode_rounded, 
           color: theme.colorScheme.primary, 
           size: 22
         ),
       ),
-      title: const Text('Dark Mode Appearance', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-      subtitle: Text(isDark ? 'Deep dark workspace' : 'Clean light workspace', style: const TextStyle(fontSize: 12)),
-      trailing: Switch(
-        value: isDark,
-        onChanged: (val) => ref.read(themeProvider.notifier).toggleTheme(val),
-        activeThumbColor: theme.colorScheme.primary,
+      title: const Text('Display Mode', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 8.0),
+        child: SegmentedButton<ThemeMode>(
+          segments: const [
+            ButtonSegment(value: ThemeMode.light, icon: Icon(Icons.light_mode_outlined), label: Text('Light')),
+            ButtonSegment(value: ThemeMode.dark, icon: Icon(Icons.dark_mode_outlined), label: Text('Dark')),
+            ButtonSegment(value: ThemeMode.system, icon: Icon(Icons.settings_suggest_outlined), label: Text('Auto')),
+          ],
+          selected: {themeState.mode},
+          onSelectionChanged: (newSelection) {
+            ref.read(themeProvider.notifier).setThemeMode(newSelection.first);
+          },
+        ),
       ),
     );
   }

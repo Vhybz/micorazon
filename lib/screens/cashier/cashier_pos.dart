@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
+import '../../core/uuid_utils.dart';
 import '../../core/utils.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../widgets/product_card.dart';
@@ -26,7 +28,9 @@ import '../../models/user_model.dart';
 import '../../services/receipt_service.dart';
 import '../../services/sms_service.dart';
 import '../../widgets/role_pop_scope.dart';
+import '../../services/held_receipt_provider.dart';
 import '../../services/birthday_service.dart';
+import '../../services/branch_provider.dart';
 
 enum POSView { sales, history }
 
@@ -42,12 +46,43 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
   String _selectedCategory = 'All';
   
   String _productSearchQuery = '';
-  String _historySearchQuery = '';
-  DateTime? _historyFilterDate;
+  final String _historySearchQuery = '';
+  DateTimeRange? _historyDateRange;
 
   // Selected customer for the current sale
   Customer? _selectedCustomer;
   String? _uploadedReceiptUrl;
+
+  static const Map<String, List<String>> allowedCatalog = {
+    'CHICKEN': [
+      'Hard Thigh', 'Soft Thigh', 'Hard Breast', 'Soft Breast', 
+      'Hard Back', 'Soft Back', 'Hard Wings', 'Soft Wings', 
+      'Hard Half Chicken', 'Soft Half Chicken', 'Hard Whole Chicken', 
+      'Soft Whole Chicken', 'Hard Drumsticks', 'Soft Drumsticks',
+      'Layer', 'Broiler'
+    ],
+    'COW': [ // Changed from BEEF to COW
+      'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Cow Steak', 
+      'Liver & Lungs', 'Grounded Meat', 'Feet', 'Head', 'Tail / Padua'
+    ],
+    'GOAT': ['Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet'],
+    'SHEEP': ['Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet'],
+    'PORK': [
+      'Standard Meat', 'Boneless Meat', 'Offals / Yemadeɛ', 'Pork Steak',
+      'Head', 'Ear', 'Feet', 'Liver', 'Skin'
+    ],
+    'TURKEY': ['Whole Turkey', 'Breast', 'Thighs', 'Drumsticks', 'Wings', 'Gizzards', 'Feet'],
+    'RABBIT': ['Whole Rabbit', 'Legs', 'Saddle', 'Shoulders'],
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    // Force a fresh sync of transfers when the POS opens
+    Future.microtask(() {
+      ref.read(transferProvider.notifier).loadTransfers();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,10 +110,6 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     final theme = Theme.of(context);
     final isDesktop = ResponsiveLayout.isDesktop(context);
     final isMobile = ResponsiveLayout.isMobile(context);
-    final transfers = ref.watch(transferProvider);
-    final pendingTransfers = transfers
-        .where((t) => t.status == TransferStatus.pending && t.destination == user.branchCode)
-        .toList();
     final isWholesale = ref.watch(isWholesaleProvider);
     final menuItems = ref.watch(menuItemsProvider);
 
@@ -118,9 +149,6 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
             title: _currentView == POSView.sales 
                 ? 'POS System (${isWholesale ? "Wholesale" : "Retail"})' 
                 : 'Sales History',
-            actions: [
-              _buildNotificationBadge(pendingTransfers),
-            ],
           ),
           drawer: isDesktop ? null : Drawer(child: _buildSidebar(context, user, menuItems)),
           body: Row(
@@ -197,35 +225,54 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     );
   }
 
-  Widget _buildNotificationBadge(List<StockTransfer> pendingTransfers) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        IconButton(
-          icon: const Icon(Icons.inventory_2_outlined),
-          onPressed: () => _showIncomingStockDialog(context, ref, pendingTransfers),
-        ),
-        if (pendingTransfers.isNotEmpty)
-          Positioned(
-            right: 4,
-            top: 10,
-            child: Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-              child: Text(
-                '${pendingTransfers.length}',
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ),
-      ],
+  void _holdCurrentReceipt() {
+    final cartItems = ref.read(cartProvider);
+    final total = ref.read(cartProvider.notifier).subtotal;
+    
+    final saleItems = cartItems.map((item) => SaleItem(
+      product: item.product,
+      quantity: item.quantity,
+      priceAtSale: item.priceAtSale,
+      originalPrice: item.originalPrice,
+    )).toList();
+
+    // Simple mock logic for discount/promo
+    ref.read(heldReceiptProvider.notifier).holdReceipt(
+      saleItems, total, 0, null, _selectedCustomer?.name, _selectedCustomer?.phone
+    );
+    ref.read(cartProvider.notifier).clear();
+    setState(() => _selectedCustomer = null);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Receipt held!')));
+  }
+
+  void _showHeldReceipts() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        final held = ref.watch(heldReceiptProvider);
+        return ListView.builder(
+          itemCount: held.length,
+          itemBuilder: (context, index) {
+            final h = held[index];
+            return ListTile(
+              title: Text('Held at ${DateFormat('HH:mm').format(h.timestamp)}'),
+              subtitle: Text(h.customerName ?? 'Walk-in'),
+              onTap: () {
+                // Resume logic
+                ref.read(cartProvider.notifier).clear();
+                for (var item in h.items) {
+                  ref.read(cartProvider.notifier).addItemWithCustomPrice(item.product, item.quantity, item.priceAtSale, item.originalPrice);
+                }
+                ref.read(heldReceiptProvider.notifier).resumeReceipt(h);
+                Navigator.pop(context);
+              },
+            );
+          },
+        );
+      },
     );
   }
+
 
   Widget _buildPOSLayout(bool isMobile, bool isDesktop) {
     final theme = Theme.of(context);
@@ -267,29 +314,13 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
 
   Widget _buildProductSection(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final user = ref.watch(currentUserProvider);
     final productsAsync = ref.watch(productsFutureProvider);
     final isWholesale = ref.watch(isWholesaleProvider);
-    int crossAxisCount = ResponsiveLayout.isMobile(context) ? 2 : (ResponsiveLayout.isTablet(context) ? 3 : 4);
+    final transfers = ref.watch(transferProvider);
 
-    // Define the official catalog allowed for the POS
-    const Map<String, List<String>> allowedCatalog = {
-      'CHICKEN': [
-        'Hard Thigh', 'Soft Thigh', 'Hard Breast', 'Soft Breast', 
-        'Hard Back', 'Soft Back', 'Hard Wings', 'Soft Wings', 
-        'Hard Half Chicken', 'Soft Half Chicken', 'Hard Whole Chicken', 
-        'Soft Whole Chicken', 'Hard Drumsticks', 'Soft Drumsticks',
-        'Layer', 'Broiler'
-      ],
-      'BEEF': [
-        'Mixed Meat', 'Boneless', 'Offals / Yemadeɛ', 'Beef Steak', 
-        'Liver & Lungs', 'Grounded Meat', 'Feet', 'Head', 'Tail / Padua'
-      ],
-      'GOAT': ['Mixed Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet'],
-      'PORK': [
-        'Mixed Meat', 'Boneless Meat', 'Offals / Yemadeɛ', 'Pork Steak', 
-        'Head', 'Ear', 'Feet', 'Liver', 'Skin'
-      ],
-    };
+    if (user == null) return const SizedBox.shrink();
+    int crossAxisCount = ResponsiveLayout.isMobile(context) ? 2 : (ResponsiveLayout.isTablet(context) ? 3 : 4);
 
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.m),
@@ -310,26 +341,30 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                       
                       if (cat.contains('CHICKEN')) {
                         mappedCat = 'CHICKEN';
-                      } else if (cat.contains('BEEF')) {
-                        mappedCat = 'BEEF';
+                      } else if (cat.contains('BEEF') || cat.contains('COW')) { 
+                        mappedCat = 'COW';
                       } else if (cat.contains('GOAT')) {
                         mappedCat = 'GOAT';
+                      } else if (cat.contains('SHEEP')) {
+                        mappedCat = 'SHEEP';
                       } else if (cat.contains('PORK')) {
                         mappedCat = 'PORK';
-                      } else if (cat.contains('LAMB')) {
-                        mappedCat = 'GOAT'; // Lamb is often grouped with goat/sheep
+                      } else if (cat.contains('TURKEY')) {
+                        mappedCat = 'TURKEY';
+                      } else if (cat.contains('RABBIT')) {
+                        mappedCat = 'RABBIT';
+                      } else {
+                        mappedCat = cat; // Fallback to original category name
                       }
                       
-                      // If category doesn't match our core list, hide it from POS
-                      if (mappedCat.isEmpty) return false;
-                      
-                      // STAGE 2: Check if Product Name is allowed in that category
-                      // We use 'contains' for name matching to handle variations like "Hard Thigh (Layer)"
-                      final bool isAllowedName = allowedCatalog[mappedCat]!.any((allowedName) => 
-                        p.name.toUpperCase().contains(allowedName.toUpperCase())
-                      );
-                      
-                      if (!isAllowedName) return false;
+                      // STAGE 2: Check if Product Name is allowed in that category (Only for standard categories)
+                      if (allowedCatalog.containsKey(mappedCat)) {
+                        final bool isAllowedName = allowedCatalog[mappedCat]!.any((allowedName) => 
+                          p.name.toUpperCase().contains(allowedName.toUpperCase())
+                        );
+                        
+                        if (!isAllowedName) return false;
+                      }
 
                       // STAGE 3: UI Search & Category Filters
                       final matchesCategory = _selectedCategory == 'All' || mappedCat == _selectedCategory;
@@ -338,6 +373,17 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                       return matchesCategory && matchesSearch;
                     })
                     .toList();
+                
+                // Sort: Priced products first, then by quantity descending
+                filtered.sort((a, b) {
+                  final aIsPriced = a.getPrice(isWholesale, customer: _selectedCustomer) > 0.01;
+                  final bIsPriced = b.getPrice(isWholesale, customer: _selectedCustomer) > 0.01;
+
+                  if (aIsPriced != bIsPriced) {
+                    return aIsPriced ? -1 : 1;
+                  }
+                  return b.stockQuantity.compareTo(a.stockQuantity);
+                });
                 
                 if (filtered.isEmpty) {
                   return Center(child: Text(_productSearchQuery.isEmpty ? 'No items in this category' : 'No products match "$_productSearchQuery"', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)));
@@ -356,6 +402,22 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                     final hasPromo = product.isPromoActiveFor(isWholesale, _selectedCustomer);
                     final currentPrice = product.getPrice(isWholesale, customer: _selectedCustomer);
                     final isPriced = currentPrice > 0.01;
+                    
+                    // NEW: Check if this specific product is currently being transferred to this branch
+                    final bool productInTransit = transfers.any((t) {
+                      if (t.status != TransferStatus.pending || t.destination != user.branchCode) return false;
+                      
+                      final mType = t.meatType.toLowerCase();
+                      final pName = product.name.toLowerCase();
+                      
+                      // Try to split "Animal - Cut"
+                      String cutToMatch = mType;
+                      if (mType.contains(' - ')) {
+                        cutToMatch = mType.split(' - ').last.trim();
+                      }
+
+                      return pName == cutToMatch || mType.contains(pName) || pName.contains(cutToMatch);
+                    });
 
                     return ProductCard(
                       name: product.name,
@@ -365,8 +427,9 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                       stockQuantity: product.stockQuantity,
                       lowStockThreshold: product.lowStockThreshold,
                       unit: product.unit,
-                      promoLabel: hasPromo ? '${product.discountPercentage.toInt()}% OFF' : null,
+                      promoLabel: hasPromo ? '${product.name} - ${product.discountPercentage.toInt()}% OFF' : null,
                       imageUrl: product.imageUrl,
+                      isInTransit: productInTransit,
                       onTap: isPriced ? () => _showWeightInputDialog(product) : () {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('This product is not yet priced. Please contact Admin.')),
@@ -537,6 +600,12 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
         customer: _selectedCustomer,
         onAdd: (weight, price, original) {
           ref.read(cartProvider.notifier).addItemWithCustomPrice(product, weight, price, original);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${product.name} (${WeightConverter.formatShort(weight)}) added to cart'),
+              duration: const Duration(seconds: 1),
+            ),
+          );
         },
       ),
     );
@@ -556,7 +625,18 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
               const Icon(Icons.shopping_cart_outlined),
               const SizedBox(width: 8),
               const Text('Current Sale', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              IconButton(
+                onPressed: () => _showHeldReceipts(),
+                icon: const Icon(Icons.list_alt, color: Colors.blue),
+                tooltip: 'View Held Receipts',
+              ),
               const Spacer(),
+              if (cartItems.isNotEmpty)
+                IconButton(
+                  onPressed: () => _holdCurrentReceipt(),
+                  icon: const Icon(Icons.pause_circle_outline, color: Colors.orange),
+                  tooltip: 'Hold Receipt',
+                ),
               if (cartItems.isNotEmpty)
                 IconButton(
                   onPressed: () => notifier.clear(),
@@ -603,8 +683,8 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     );
   }
 
-  void _showCustomerDialog() {
-    showDialog(
+  Future<void> _showCustomerDialog() async {
+    await showDialog(
       context: context,
       builder: (context) => CustomerSelectionDialog(
         onSelected: (customer) {
@@ -632,10 +712,10 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
       
       if (isFavorite) {
         discountPercentage = 0.10;
-        promoLabel = 'Favorite Customer Reward (10% OFF)';
+        promoLabel = '${cartItems.first.product.category} - Favorite Customer Reward (10% OFF)';
       } else if (totalWeight >= 10) {
         discountPercentage = 0.05;
-        promoLabel = 'Bulk Purchase Reward (5% OFF)';
+        promoLabel = '${cartItems.first.product.category} - Bulk Purchase Reward (5% OFF)';
       }
     }
 
@@ -724,6 +804,9 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
       final proceed = await _showDebtCustomerRequiredDialog();
       if (!proceed) return;
       
+      // Open customer dialog and wait for it
+      await _showCustomerDialog();
+      
       // If they registered/selected a customer, _selectedCustomer will be non-null now
       if (_selectedCustomer == null) return; 
     }
@@ -749,14 +832,20 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
       customerName: _selectedCustomer?.name,
       customerPhone: _selectedCustomer?.phone,
       status: hasBankDeposit ? SaleStatus.awaitingDeposit : SaleStatus.completed,
+      isVerified: !hasBankDeposit, // Cash/MoMo sales are verified immediately
       bankReceiptUrl: _uploadedReceiptUrl,
     );
 
     await ref.read(saleHistoryProvider.notifier).addSale(sale);
     ref.read(cartProvider.notifier).clear();
     
-    // Send SMS 
-    SmsService.sendReceiptSms(sale, discountAmount: discount);
+    // Send SMS with branch identification
+    final currentBranch = ref.read(currentBranchProvider);
+    final String? branchName = currentBranch != null 
+        ? '${currentBranch.name} (${currentBranch.location})' 
+        : null;
+
+    SmsService.sendReceiptSms(sale, discountAmount: discount, branchName: branchName);
 
     setState(() {
       _selectedCustomer = null;
@@ -770,11 +859,16 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     final result = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange),
-            SizedBox(width: 8),
-            Text('Customer Required'),
+            const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Customer Required', 
+                style: TextStyle(fontSize: ResponsiveLayout.isMobile(context) ? 18 : null),
+                overflow: TextOverflow.ellipsis
+              ),
+            ),
           ],
         ),
         content: const Text(
@@ -782,17 +876,32 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
           'To track this debt, you must select or register a customer before completing the sale.'
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel Sale'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context, true);
-              _showCustomerDialog();
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryMaroon, foregroundColor: Colors.white),
-            child: const Text('Register / Select Customer'),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancel Sale'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(context, true);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryMaroon, 
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                  child: const FittedBox(
+                    child: Text('Register / Select Customer', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -813,6 +922,9 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
 
   Widget _buildFooter() {
     final theme = Theme.of(context);
+    final isMobile = ResponsiveLayout.isMobile(context);
+    final pendingCount = ref.watch(pendingIncomingTransfersProvider).length;
+
     return Container(
       height: 65,
       decoration: BoxDecoration(
@@ -823,25 +935,54 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _footerAction(Icons.point_of_sale, 'New Sale', _currentView == POSView.sales, () => setState(() => _currentView = POSView.sales)),
+          if (isMobile)
+            _footerAction(
+              Icons.qr_code_scanner_rounded, 
+              'Incoming Stock', 
+              false, 
+              () => Navigator.pushNamed(context, '/cashier/verify-stock'),
+              badge: pendingCount > 0 ? pendingCount : null,
+            ),
           _footerAction(Icons.history, 'Transaction History', _currentView == POSView.history, () => setState(() => _currentView = POSView.history)),
         ],
       ),
     );
   }
 
-  Widget _footerAction(IconData icon, String label, bool isSelected, VoidCallback onTap) {
+  Widget _footerAction(IconData icon, String label, bool isSelected, VoidCallback onTap, {int? badge}) {
     final theme = Theme.of(context);
     return InkWell(
       onTap: onTap,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          Icon(icon, color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
-          Text(label, style: TextStyle(
-            color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
-            fontSize: 10,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          )),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant),
+              Text(label, style: TextStyle(
+                color: isSelected ? theme.colorScheme.primary : theme.colorScheme.onSurfaceVariant,
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              )),
+            ],
+          ),
+          if (badge != null && badge > 0)
+            Positioned(
+              right: -4,
+              top: 8,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                child: Center(
+                  child: Text(
+                    '$badge',
+                    style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -852,140 +993,279 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     final salesHistory = ref.watch(saleHistoryProvider);
     final filteredHistory = salesHistory.where((s) {
       final matchesSearch = s.id.toLowerCase().contains(_historySearchQuery.toLowerCase());
-      final matchesDate = _historyFilterDate == null || 
-        (s.timestamp.day == _historyFilterDate!.day && s.timestamp.month == _historyFilterDate!.month);
+      final matchesDate = _historyDateRange == null || 
+        (s.timestamp.isAfter(_historyDateRange!.start.subtract(const Duration(seconds: 1))) && 
+         s.timestamp.isBefore(_historyDateRange!.end.add(const Duration(days: 1))));
       return matchesSearch && matchesDate;
     }).toList();
 
-    return Padding(
-      padding: const EdgeInsets.all(AppSpacing.l),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text('Recent Transactions', 
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: ElevatedButton.icon(
-                  onPressed: () => ReceiptService.printSalesReport(filteredHistory, title: 'Cashier Daily Sales Report'),
-                  icon: const Icon(Icons.print, size: 18),
-                  label: const Text('Print Report', style: TextStyle(fontSize: 12)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary, 
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.m),
-          Row(
+    // Stats calculations
+    double totalSales = 0;
+    double totalCost = 0;
+    final Map<String, double> productQtyMap = {};
+
+    for (var sale in filteredHistory) {
+      if (sale.status == SaleStatus.cancelled) continue;
+      totalSales += sale.totalAmount;
+      totalCost += sale.totalCost;
+      for (var item in sale.items) {
+        productQtyMap[item.product.name] = (productQtyMap[item.product.name] ?? 0) + item.quantity;
+      }
+    }
+    final totalProfit = totalSales - totalCost;
+
+    return Column(
+      children: [
+        // Non-scrollable Header (Date Filter)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.l, AppSpacing.l, AppSpacing.l, 0),
+          child: Row(
             children: [
               Expanded(
                 flex: 2,
-                child: SizedBox(
-                  height: 45,
-                  child: TextField(
-                    onChanged: (v) => setState(() => _historySearchQuery = v),
-                    decoration: InputDecoration(
-                      hintText: 'Search Receipt # or Customer Name...',
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                    ),
-                    style: const TextStyle(fontSize: 13),
-                  ),
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final picked = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(2023),
+                      lastDate: DateTime.now(),
+                      initialDateRange: _historyDateRange,
+                    );
+                    if (picked != null) {
+                      setState(() => _historyDateRange = picked);
+                    }
+                  },
+                  icon: const Icon(Icons.date_range),
+                  label: Text(_historyDateRange == null 
+                    ? 'Select Date Range' 
+                    : '${DateFormat('MMM dd').format(_historyDateRange!.start)} - ${DateFormat('MMM dd').format(_historyDateRange!.end)}'),
                 ),
               ),
-              const SizedBox(width: AppSpacing.s),
-              Expanded(
-                child: SizedBox(
-                  height: 45,
-                  child: TextButton.icon(
-                    onPressed: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        initialDate: DateTime.now(),
-                        firstDate: DateTime(2023),
-                        lastDate: DateTime.now(),
-                      );
-                      if (picked != null) setState(() => _historyFilterDate = picked);
+              if (_historyDateRange != null && filteredHistory.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () {
+                      final period = '${DateFormat('MMM dd, yyyy').format(_historyDateRange!.start)} - ${DateFormat('MMM dd, yyyy').format(_historyDateRange!.end)}';
+                      ReceiptService.printDetailedHistoryReport(filteredHistory, period: period);
                     },
-                    icon: const Icon(Icons.calendar_today, size: 16),
-                    label: Text(
-                      _historyFilterDate == null ? 'Date' : DateFormat('MMM dd').format(_historyFilterDate!),
-                      style: const TextStyle(fontSize: 12),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                    icon: const Icon(Icons.print, size: 18),
+                    label: const Text('PRINT', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: Colors.white,
                     ),
                   ),
                 ),
-              ),
-              if (_historyFilterDate != null || _historySearchQuery.isNotEmpty)
-                IconButton(
-                  icon: const Icon(Icons.clear, size: 20), 
-                  onPressed: () => setState(() { _historyFilterDate = null; _historySearchQuery = ''; }),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                ),
+              ],
             ],
           ),
-          const SizedBox(height: AppSpacing.l),
-          Expanded(
-            child: filteredHistory.isEmpty 
-              ? Center(child: Text('No transactions found.', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)))
-              : ListView.builder(
-                  itemCount: filteredHistory.length,
-                  itemBuilder: (context, index) {
-                    final sale = filteredHistory[index];
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
-                          child: Icon(Icons.receipt_long, color: theme.colorScheme.primary, size: 20),
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(sale.id, 
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), 
-                                overflow: TextOverflow.ellipsis
-                              ),
+        ),
+        
+        // Scrollable Content
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.l),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_historyDateRange != null && filteredHistory.isNotEmpty) ...[
+                  _buildHistorySummaryCards(totalSales, totalProfit, theme),
+                  const SizedBox(height: 24),
+                  Text('SALES TREND', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  _buildSalesChart(filteredHistory, theme),
+                  const SizedBox(height: 24),
+                  Text('PRODUCT QUANTITIES SOLD', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  _buildProductQtyList(productQtyMap, theme),
+                  const SizedBox(height: 24),
+                ],
+
+                Text('TRANSACTION LOG', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                filteredHistory.isEmpty 
+                  ? Center(child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Text('No transactions found.', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+                    ))
+                  : ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: filteredHistory.length,
+                      itemBuilder: (context, index) {
+                        final sale = filteredHistory[index];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
+                              child: Icon(Icons.receipt_long, color: theme.colorScheme.primary, size: 20),
                             ),
-                            const SizedBox(width: 8),
-                            Text('₵${sale.totalAmount.toStringAsFixed(2)}', 
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(sale.id, 
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), 
+                                    overflow: TextOverflow.ellipsis
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text('₵${sale.totalAmount.toStringAsFixed(2)}', 
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('${DateFormat('HH:mm').format(sale.timestamp)} • ${sale.items.length} items', style: const TextStyle(fontSize: 10)),
-                            Text('Cust: ${sale.customerName ?? "Walk-in"}', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant), overflow: TextOverflow.ellipsis),
-                          ],
-                        ),
-                        trailing: const Icon(Icons.chevron_right, size: 20),
-                        onTap: () => _showSaleDetails(sale),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${DateFormat('HH:mm').format(sale.timestamp)} • ${sale.items.length} items', style: const TextStyle(fontSize: 10)),
+                                Text('Cust: ${sale.customerName ?? "Walk-in"}', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant), overflow: TextOverflow.ellipsis),
+                              ],
+                            ),
+                            trailing: const Icon(Icons.chevron_right, size: 20),
+                            onTap: () => _showSaleDetails(sale),
+                          ),
+                        );
+                      },
+                    ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHistorySummaryCards(double totalSales, double totalProfit, ThemeData theme) {
+    return Row(
+      children: [
+        _summaryStatCard('TOTAL SALES', '₵${totalSales.toStringAsFixed(2)}', theme.colorScheme.primary, theme),
+        const SizedBox(width: 12),
+        _summaryStatCard('TOTAL PROFIT', '₵${totalProfit.toStringAsFixed(2)}', AppColors.accentGreen, theme),
+      ],
+    );
+  }
+
+  Widget _summaryStatCard(String label, String value, Color color, ThemeData theme) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(AppRadius.m),
+          border: Border.all(color: theme.dividerColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalesChart(List<SaleRecord> sales, ThemeData theme) {
+    if (sales.isEmpty) return const SizedBox.shrink();
+
+    // Group by day
+    final Map<DateTime, double> dailyTotals = {};
+    for (var s in sales) {
+      if (s.status == SaleStatus.cancelled) continue;
+      final day = DateTime(s.timestamp.year, s.timestamp.month, s.timestamp.day);
+      dailyTotals[day] = (dailyTotals[day] ?? 0) + s.totalAmount;
+    }
+
+    final sortedDays = dailyTotals.keys.toList()..sort();
+    if (sortedDays.isEmpty) return const SizedBox.shrink();
+
+    final spots = <FlSpot>[];
+    for (int i = 0; i < sortedDays.length; i++) {
+      spots.add(FlSpot(i.toDouble(), dailyTotals[sortedDays[i]]!));
+    }
+
+    return Container(
+      height: 200,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: LineChart(
+        LineChartData(
+          gridData: const FlGridData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  final index = value.toInt();
+                  if (index >= 0 && index < sortedDays.length) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        DateFormat('MM/dd').format(sortedDays[index]),
+                        style: const TextStyle(fontSize: 10),
                       ),
                     );
-                  },
-                ),
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
+            ),
           ),
-        ],
+          borderData: FlBorderData(show: false),
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true,
+              color: theme.colorScheme.primary,
+              barWidth: 4,
+              isStrokeCapRound: true,
+              dotData: const FlDotData(show: false),
+              belowBarData: BarAreaData(
+                show: true,
+                color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              ),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildProductQtyList(Map<String, double> qtyMap, ThemeData theme) {
+    final sortedProducts = qtyMap.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Column(
+      children: sortedProducts.map((e) => Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: theme.cardColor,
+          borderRadius: BorderRadius.circular(AppRadius.s),
+          border: Border.all(color: theme.dividerColor),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(child: Text(e.key, style: const TextStyle(fontWeight: FontWeight.bold))),
+            Text(WeightConverter.formatShort(e.value), 
+              style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w900)),
+          ],
+        ),
+      )).toList(),
     );
   }
 
@@ -1463,7 +1743,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                       if (loadingProgress == null) return child;
                       return const Center(child: CircularProgressIndicator());
                     },
-                    errorBuilder: (_, __, ___) => const Center(child: Text('Could not load image')),
+                    errorBuilder: (context, error, stackTrace) => const Center(child: Text('Could not load image')),
                   ),
                 ),
               ),
@@ -1543,233 +1823,6 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     }
   }
 
-  void _showIncomingStockDialog(BuildContext context, WidgetRef ref, List<StockTransfer> transfers) {
-    final theme = Theme.of(context);
-    final scanController = TextEditingController();
-    final scanFocusNode = FocusNode();
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          void handleScan(String value) {
-            if (value.isEmpty) return;
-            // Try to find a matching transfer by ID (handling short IDs on labels)
-            final match = transfers.where((t) => 
-              t.id.toLowerCase() == value.toLowerCase() || 
-              t.id.endsWith(value.toUpperCase())
-            ).firstOrNull;
-
-            if (match != null) {
-              ref.read(transferProvider.notifier).markAsReceived(match.id).then((_) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Scanned & Received: ${match.meatType}'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-                scanController.clear();
-                // Refresh dialog state to show item is gone
-                setDialogState(() {});
-              }).catchError((e) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error: ${e.toString().replaceAll('Exception:', '')}'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              });
-            } else {
-              // Not found feedback
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('No matching stock found for this barcode.'), duration: Duration(seconds: 1)),
-              );
-              scanController.clear();
-            }
-            scanFocusNode.requestFocus();
-          }
-
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-            title: Row(
-              children: [
-                Icon(Icons.inventory_2, color: theme.colorScheme.primary),
-                const SizedBox(width: 12),
-                const Expanded(child: Text('Incoming Stock Verification')),
-                if (transfers.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.orange.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-                    child: Text('${transfers.length} PENDING', style: const TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
-                  ),
-              ],
-            ),
-            content: SizedBox(
-              width: 450,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (transfers.isNotEmpty) ...[
-                    TextField(
-                      controller: scanController,
-                      focusNode: scanFocusNode,
-                      autofocus: true,
-                      decoration: InputDecoration(
-                        hintText: 'Scan barcode or type ID...',
-                        prefixIcon: const Icon(Icons.qr_code_scanner),
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.check_circle_outline),
-                          onPressed: () => handleScan(scanController.text),
-                        ),
-                        border: const OutlineInputBorder(),
-                        isDense: true,
-                        helperText: 'Connect a scanner to automate verification',
-                        helperStyle: const TextStyle(fontSize: 9),
-                      ),
-                      onSubmitted: handleScan,
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  Flexible(
-                    child: transfers.isEmpty
-                        ? const Padding(padding: EdgeInsets.all(30), child: Column(
-                            children: [
-                              Icon(Icons.check_circle, color: Colors.green, size: 48),
-                              SizedBox(height: 12),
-                              Text('All stock verified and received.', textAlign: TextAlign.center),
-                            ],
-                          ))
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: transfers.length,
-                            itemBuilder: (context, index) {
-                              final t = transfers[index];
-                              final isAwaitingPayment = t.status == TransferStatus.awaitingPayment;
-
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 8),
-                                elevation: 0,
-                                color: isAwaitingPayment 
-                                    ? Colors.orange.withValues(alpha: 0.05)
-                                    : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(AppRadius.m), 
-                                  side: BorderSide(color: isAwaitingPayment ? Colors.orange.shade200 : theme.dividerColor)
-                                ),
-                                child: ListTile(
-                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                                  leading: Icon(
-                                    isAwaitingPayment ? Icons.payments_outlined : Icons.shopping_basket_outlined, 
-                                    color: isAwaitingPayment ? Colors.orange : theme.colorScheme.onSurfaceVariant,
-                                    size: 20
-                                  ),
-                                  title: Text(t.meatType, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                  subtitle: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text('Weight: ${WeightConverter.formatShort(t.weight)} • Batch: ${t.batchId.length > 8 ? t.batchId.substring(0, 8) : t.batchId}', 
-                                        style: const TextStyle(fontSize: 10)),
-                                      if (isAwaitingPayment)
-                                        const Text('PAYMENT REQUIRED BEFORE ACCEPTANCE', 
-                                          style: TextStyle(fontSize: 9, color: Colors.orange, fontWeight: FontWeight.bold)),
-                                    ],
-                                  ),
-                                  trailing: IconButton(
-                                    icon: Icon(
-                                      isAwaitingPayment ? Icons.check_circle : Icons.add_task, 
-                                      color: Colors.green
-                                    ),
-                                    tooltip: isAwaitingPayment ? 'Accept Payment & Confirm' : 'Verify Manually',
-                                    onPressed: () {
-                                      if (isAwaitingPayment) {
-                                        _confirmDirectTransferPayment(context, ref, t, () => setDialogState(() {}));
-                                      } else {
-                                        ref.read(transferProvider.notifier).markAsReceived(t.id).then((_) {
-                                          if (!context.mounted) return;
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('Manually Received ${t.weight}kg of ${t.meatType}')),
-                                          );
-                                          setDialogState(() {});
-                                        }).catchError((e) {
-                                          if (!context.mounted) return;
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(
-                                              content: Text('Error: ${e.toString().replaceAll('Exception:', '')}'),
-                                              backgroundColor: Colors.red,
-                                            ),
-                                          );
-                                        });
-                                      }
-                                    },
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close Window')),
-            ],
-          );
-        }
-      ),
-    );
-  }
-
-  void _confirmDirectTransferPayment(BuildContext context, WidgetRef ref, StockTransfer transfer, VoidCallback onDone) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Third-Party Payment'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Has the customer paid for this direct transfer?'),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                children: [
-                  _detailRow('Item', transfer.meatType),
-                  _detailRow('Weight', '${transfer.weight}kg'),
-                  _detailRow('Source', 'Butcher House'),
-                  _detailRow('Recipient', transfer.destination),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Not Yet')),
-          ElevatedButton(
-            onPressed: () {
-              ref.read(transferProvider.notifier).markAsReceived(transfer.id).then((_) {
-                if (!context.mounted) return;
-                Navigator.pop(context);
-                onDone();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Payment Confirmed & Stock Updated'), backgroundColor: Colors.green),
-                );
-              });
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-            child: const Text('Yes, Paid & Received'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _detailRow(String label, String value, {bool isBold = false, Color? color}) {
     final theme = Theme.of(context);
     return Padding(
@@ -1806,10 +1859,10 @@ class ProductWeightDialog extends StatefulWidget {
 
 class _ProductWeightDialogState extends State<ProductWeightDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _weightController = TextEditingController();
+  late final TextEditingController _weightController;
   final _qtyController = TextEditingController(text: '1');
   WeightUnit _unit = WeightUnit.kg;
-  double _weight = 0;
+  double _weight = 1.0;
   int _quantity = 1;
 
   void _toggleUnit(WeightUnit unit) {
@@ -1834,7 +1887,15 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
       (u) => u.name == widget.product.unit, 
       orElse: () => WeightUnit.kg
     );
-    // If product is defined as units, disable the KG/LB toggle UI or similar
+    _weight = 1.0;
+    _weightController = TextEditingController(text: '1.0');
+  }
+
+  @override
+  void dispose() {
+    _weightController.dispose();
+    _qtyController.dispose();
+    super.dispose();
   }
 
   @override
@@ -1865,139 +1926,172 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
 
         return Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-          child: Container(
-            width: MediaQuery.of(context).size.width * 0.9,
+          child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 360),
-            height: 380, // Slightly taller to fit info
-            padding: const EdgeInsets.all(AppSpacing.l),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  Text(
-                    widget.product.category.toUpperCase(),
-                    style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-                  ),
-                  Text(
-                    widget.product.name,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
-                  const Spacer(),
-                  if (!isPcs)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('KG', style: TextStyle(fontSize: 11)), 
-                          selected: _unit == WeightUnit.kg, 
-                          onSelected: (_) => _toggleUnit(WeightUnit.kg)
-                        ),
-                        const SizedBox(width: 8),
-                        ChoiceChip(
-                          label: const Text('LB', style: TextStyle(fontSize: 11)), 
-                          selected: _unit == WeightUnit.lb, 
-                          onSelected: (_) => _toggleUnit(WeightUnit.lb)
-                        ),
-                      ],
-                    )
-                  else
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text('PRICED PER UNIT/PCS', style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold)),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(AppSpacing.l),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.product.category.toUpperCase(),
+                      style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2),
                     ),
-                  const SizedBox(height: AppSpacing.m),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _weightController,
-                          textAlign: TextAlign.center,
-                          decoration: InputDecoration(
-                            labelText: isPcs ? 'Quantity' : 'Weight',
-                            suffixText: isPcs ? 'pcs' : _unit.name,
-                            contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                          ),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                          onChanged: (v) => setState(() => _weight = double.tryParse(v) ?? 0),
-                          validator: (v) => (v == null || (double.tryParse(v) ?? 0) <= 0) ? '!' : null,
-                        ),
-                      ),
-                      if (!isPcs) ...[
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: TextFormField(
-                            controller: _qtyController,
-                            textAlign: TextAlign.center,
-                            decoration: const InputDecoration(
-                              labelText: 'Packs',
-                              suffixText: 'qty',
-                              contentPadding: EdgeInsets.symmetric(vertical: 8),
-                            ),
-                            keyboardType: TextInputType.number,
-                            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                            onChanged: (v) => setState(() => _quantity = int.tryParse(v) ?? 1),
-                            validator: (v) => (v == null || (int.tryParse(v) ?? 0) <= 0) ? '!' : null,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const Spacer(),
-                  Column(
-                    children: [
+                    Text(
+                      widget.product.name,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: AppSpacing.m),
+                    if (!isPcs)
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          if (hasPromo) ...[
-                            Text('₵${comparisonPrice.toStringAsFixed(2)}', 
-                              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, decoration: TextDecoration.lineThrough, fontSize: 12)),
-                            const SizedBox(width: 6),
-                          ],
-                          Text('₵${currentPrice.toStringAsFixed(2)}/${isPcs ? "unit" : "kg"}', 
-                            style: TextStyle(color: hasPromo ? Colors.orange.shade800 : theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 14)),
+                          ChoiceChip(
+                            label: const Text('KG', style: TextStyle(fontSize: 11)), 
+                            selected: _unit == WeightUnit.kg, 
+                            onSelected: (_) => _toggleUnit(WeightUnit.kg)
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('LB', style: TextStyle(fontSize: 11)), 
+                            selected: _unit == WeightUnit.lb, 
+                            onSelected: (_) => _toggleUnit(WeightUnit.lb)
+                          ),
                         ],
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text('PRICED PER UNIT/PCS', style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold)),
                       ),
-                      Text(
-                        'Total: ₵${total.toStringAsFixed(2)}',
-                        style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24, color: theme.colorScheme.primary),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () {
-                        if (_formKey.currentState!.validate()) {
-                          final isWholesale = ref.read(isWholesaleProvider);
-                          final effectiveWeight = isPcs ? _weight : (_unit == WeightUnit.kg ? _weight : WeightConverter.toKg(_weight));
-                          final currentPrice = widget.product.getPrice(isWholesale, weight: effectiveWeight, customer: widget.customer);
-                          double comparisonPrice = isWholesale ? (widget.product.wholesalePrice) : (widget.product.retailPrice);
-                          widget.onAdd(effectiveWeight * (isPcs ? 1 : _quantity), currentPrice, comparisonPrice);
-                          Navigator.pop(context);
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: theme.colorScheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
-                      ),
-                      child: const Text('Add to Cart', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: AppSpacing.m),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _weightController,
+                            textAlign: TextAlign.center,
+                            decoration: InputDecoration(
+                              labelText: isPcs ? 'Quantity' : 'Weight',
+                              suffixText: isPcs ? 'pcs' : _unit.name,
+                              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                              errorText: (isPcs ? _weight : kgWeight) > widget.product.stockQuantity 
+                                ? 'Only ${widget.product.stockQuantity}${isPcs ? "pcs" : "kg"} available' 
+                                : null,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                            onChanged: (v) => setState(() => _weight = double.tryParse(v) ?? 0),
+                            validator: (v) {
+                              if (v == null || (double.tryParse(v) ?? 0) <= 0) return '!';
+                              final val = double.tryParse(v) ?? 0;
+                              final checkWeight = isPcs ? val : (_unit == WeightUnit.kg ? val : WeightConverter.toKg(val));
+                              if (checkWeight > widget.product.stockQuantity) return 'Insufficient Stock';
+                              return null;
+                            },
+                          ),
+                        ),
+                        if (!isPcs) ...[
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _qtyController,
+                              textAlign: TextAlign.center,
+                              decoration: InputDecoration(
+                                labelText: 'Packs',
+                                suffixText: 'qty',
+                                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                                errorText: (kgWeight * _quantity) > widget.product.stockQuantity
+                                  ? 'Exceeds total stock'
+                                  : null,
+                              ),
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              onChanged: (v) => setState(() => _quantity = int.tryParse(v) ?? 1),
+                              validator: (v) {
+                                if (v == null || (int.tryParse(v) ?? 0) <= 0) return '!';
+                                if ((kgWeight * (int.tryParse(v) ?? 1)) > widget.product.stockQuantity) return 'Exceeds stock';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
-                ],
+                    const SizedBox(height: AppSpacing.m),
+                    if (widget.product.stockQuantity <= 0)
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.error_outline, color: Colors.red, size: 16),
+                            SizedBox(width: 8),
+                            Text('FINISHED: OUT OF STOCK', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: AppSpacing.m),
+                    Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (hasPromo) ...[
+                              Text('₵${comparisonPrice.toStringAsFixed(2)}', 
+                                style: TextStyle(color: theme.colorScheme.onSurfaceVariant, decoration: TextDecoration.lineThrough, fontSize: 12)),
+                              const SizedBox(width: 6),
+                            ],
+                            Text('₵${currentPrice.toStringAsFixed(2)}/${isPcs ? "unit" : "kg"}', 
+                              style: TextStyle(color: hasPromo ? Colors.orange.shade800 : theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 14)),
+                          ],
+                        ),
+                        Text(
+                          'Total: ₵${total.toStringAsFixed(2)}',
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24, color: theme.colorScheme.primary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.m),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: (widget.product.stockQuantity <= 0 || (isPcs ? _weight : (kgWeight * _quantity)) > widget.product.stockQuantity)
+                          ? null 
+                          : () {
+                            if (_formKey.currentState!.validate()) {
+                              final isWholesale = ref.read(isWholesaleProvider);
+                              final effectiveWeight = isPcs ? _weight : (_unit == WeightUnit.kg ? _weight : WeightConverter.toKg(_weight));
+                              final currentPrice = widget.product.getPrice(isWholesale, weight: effectiveWeight, customer: widget.customer);
+                              double comparisonPrice = isWholesale ? (widget.product.wholesalePrice) : (widget.product.retailPrice);
+                              widget.onAdd(effectiveWeight * (isPcs ? 1 : _quantity), currentPrice, comparisonPrice);
+                              Navigator.pop(context);
+                            }
+                          },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: theme.colorScheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                        ),
+                        child: Text(widget.product.stockQuantity <= 0 ? 'ITEM FINISHED' : 'Add to Cart', style: const TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
         );
-      }
+      },
     );
   }
 }
@@ -2030,144 +2124,154 @@ class _CustomerSelectionDialogState extends ConsumerState<CustomerSelectionDialo
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-      child: Container(
-        width: MediaQuery.of(context).size.width * 0.9,
-        constraints: const BoxConstraints(maxWidth: 380),
-        height: 480, // Keeping it slightly taller but constrained
-        padding: const EdgeInsets.all(AppSpacing.l),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  _isNewCustomer ? 'REGISTER CUSTOMER' : 'SELECT CUSTOMER',
-                  style: TextStyle(color: theme.colorScheme.primary, fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 1.5),
-                ),
-                IconButton(
-                  icon: Icon(_isNewCustomer ? Icons.group_rounded : Icons.person_add_alt_1_rounded, color: theme.colorScheme.primary),
-                  onPressed: () => setState(() => _isNewCustomer = !_isNewCustomer),
-                ),
-              ],
-            ),
-            const Divider(),
-            const SizedBox(height: 8),
-            if (!_isNewCustomer) ...[
-              TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search name or phone...',
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
-                  isDense: true,
-                ),
-                onChanged: (v) => setState(() => _searchQuery = v),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: filtered.isEmpty
-                  ? const Center(child: Text('No matches found.', style: TextStyle(color: AppColors.textLight, fontSize: 12)))
-                  : ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
-                        final c = filtered[index];
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: CircleAvatar(
-                            backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
-                            child: Icon(c.isFavorite ? Icons.star : Icons.person,
-                                color: c.isFavorite ? Colors.orange : theme.colorScheme.primary, size: 20),
-                          ),
-                          title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: Text('${c.phone}${c.location != null ? " • ${c.location}" : ""}', style: const TextStyle(fontSize: 11)),
-                          onTap: () {
-                            widget.onSelected(c);
-                            Navigator.pop(context);
-                          },
-                        );
-                      },
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380, maxHeight: 600),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.l),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      _isNewCustomer ? 'REGISTER CUSTOMER' : 'SELECT CUSTOMER',
+                      style: TextStyle(
+                        color: theme.colorScheme.primary, 
+                        fontSize: ResponsiveLayout.isMobile(context) ? 12 : 13, 
+                        fontWeight: FontWeight.w900, 
+                        letterSpacing: 1.2
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    icon: Icon(_isNewCustomer ? Icons.group_rounded : Icons.person_add_alt_1_rounded, color: theme.colorScheme.primary, size: 20),
+                    onPressed: () => setState(() => _isNewCustomer = !_isNewCustomer),
+                  ),
+                ],
               ),
-            ] else ...[
-              Expanded(
-                child: Form(
-                  key: _formKey,
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: [
-                        TextFormField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(labelText: 'Full Name', prefixIcon: Icon(Icons.badge_outlined)),
-                          validator: (v) => v!.isEmpty ? 'Required' : null,
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _phoneController,
-                          decoration: const InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)],
-                          validator: (v) => v!.length != 10 ? 'Invalid' : null,
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _locationController,
-                          decoration: const InputDecoration(labelText: 'Location / Area', prefixIcon: Icon(Icons.location_on_outlined)),
-                          validator: (v) => v!.isEmpty ? 'Required' : null,
-                        ),
-                        const SizedBox(height: 32),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed: () async {
-                              if (_formKey.currentState!.validate()) {
-                                final user = ref.read(currentUserProvider);
-                                final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-                                final String suffix = timestamp.substring(timestamp.length - 12);
-                                final String validUuid = '00000000-0000-0000-0000-$suffix';
+              const Divider(),
+              const SizedBox(height: 8),
+              if (!_isNewCustomer) ...[
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Search name or phone...',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                    isDense: true,
+                  ),
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: filtered.isEmpty
+                    ? const Center(child: Text('No matches found.', style: TextStyle(color: AppColors.textLight, fontSize: 12)))
+                    : ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (context, index) {
+                          final c = filtered[index];
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: CircleAvatar(
+                              backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
+                              child: Icon(c.isFavorite ? Icons.star : Icons.person,
+                                  color: c.isFavorite ? Colors.orange : theme.colorScheme.primary, size: 20),
+                            ),
+                            title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            subtitle: Text('${c.phone}${c.location != null ? " • ${c.location}" : ""}', style: const TextStyle(fontSize: 11)),
+                            onTap: () {
+                              widget.onSelected(c);
+                              Navigator.pop(context);
+                            },
+                          );
+                        },
+                      ),
+                ),
+              ] else ...[
+                Expanded(
+                  child: Form(
+                    key: _formKey,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          TextFormField(
+                            controller: _nameController,
+                            decoration: const InputDecoration(labelText: 'Full Name', prefixIcon: Icon(Icons.badge_outlined)),
+                            validator: (v) => v!.isEmpty ? 'Required' : null,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _phoneController,
+                            decoration: const InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
+                            keyboardType: TextInputType.phone,
+                            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)],
+                            validator: (v) => v!.length != 10 ? 'Invalid' : null,
+                          ),
+                          const SizedBox(height: 12),
+                          TextFormField(
+                            controller: _locationController,
+                            decoration: const InputDecoration(labelText: 'Location / Area', prefixIcon: Icon(Icons.location_on_outlined)),
+                            validator: (v) => v!.isEmpty ? 'Required' : null,
+                          ),
+                          const SizedBox(height: 32),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: () async {
+                                if (_formKey.currentState!.validate()) {
+                                  final user = ref.read(currentUserProvider);
+                                  final String validUuid = UuidUtils.generate();
 
-                                final newCustomer = Customer(
-                                  id: validUuid,
-                                  branchCode: user?.branchCode,
-                                  name: _nameController.text,
-                                  phone: _phoneController.text,
-                                  location: _locationController.text,
-                                );
-                                
-                                try {
-                                  final saved = await ref.read(customerProvider.notifier).addCustomer(newCustomer);
-                                  if (saved != null) {
-                                    widget.onSelected(saved);
-                                  }
-                                  if (context.mounted) Navigator.pop(context);
-                                } catch (e) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Failed to save customer: $e'), backgroundColor: Colors.red),
-                                    );
+                                  final newCustomer = Customer(
+                                    id: validUuid,
+                                    branchCode: user?.branchCode,
+                                    name: _nameController.text,
+                                    phone: _phoneController.text,
+                                    location: _locationController.text,
+                                  );
+                                  
+                                  try {
+                                    // 1. Trigger the add (now optimistic and non-blocking for network)
+                                    ref.read(customerProvider.notifier).addCustomer(newCustomer);
+                                    
+                                    // 2. Immediately select and close dialog
+                                    widget.onSelected(newCustomer);
+                                    if (context.mounted) Navigator.pop(context);
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Error adding customer: $e'), backgroundColor: Colors.red),
+                                      );
+                                    }
                                   }
                                 }
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: theme.colorScheme.primary, 
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: theme.colorScheme.primary, 
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                              ),
+                              child: const Text('Register & Select', style: TextStyle(fontWeight: FontWeight.bold)),
                             ),
-                            child: const Text('Register & Select', style: TextStyle(fontWeight: FontWeight.bold)),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
+              ],
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(context), 
+                child: const Text('DISMISS', style: TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold, fontSize: 11)),
               ),
             ],
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: () => Navigator.pop(context), 
-              child: const Text('DISMISS', style: TextStyle(color: AppColors.textLight, fontWeight: FontWeight.bold, fontSize: 11)),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -2203,7 +2307,8 @@ class _PaymentDialogState extends ConsumerState<PaymentDialog> {
   void _addPayment() {
     if (_formKey.currentState!.validate()) {
       final amount = double.tryParse(_amountController.text) ?? 0;
-      if (amount <= 0) return;
+      // Allow zero amount for credit/debt sales
+      if (amount < 0) return; 
 
       setState(() {
         _payments.add(PaymentDetail(
@@ -2235,41 +2340,41 @@ class _PaymentDialogState extends ConsumerState<PaymentDialog> {
     }
 
     return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-      child: Container(
-        width: MediaQuery.of(context).size.width * 0.95,
-        constraints: const BoxConstraints(maxWidth: 450),
-        height: 600, // Balanced height
-        padding: const EdgeInsets.all(AppSpacing.l),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Icon(Icons.payments_rounded, color: theme.colorScheme.primary),
-                const SizedBox(width: 12),
-                Text(
-                  'COLLECT PAYMENT',
-                  style: TextStyle(color: theme.colorScheme.primary, fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 1.5),
-                ),
-              ],
-            ),
-            const Divider(height: 24),
-            Expanded(
-              child: SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 400),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.l, AppSpacing.l, AppSpacing.l, AppSpacing.m),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.payments_rounded, color: theme.colorScheme.primary),
+                  const SizedBox(width: 12),
+                  Text(
+                    'COLLECT PAYMENT',
+                    style: TextStyle(color: theme.colorScheme.primary, fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 1.5),
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+              SingleChildScrollView(
                 child: Column(
                   children: [
                     // Compact Summary Card
                     Container(
-                      padding: const EdgeInsets.all(AppSpacing.m),
+                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.l, vertical: AppSpacing.m),
                       decoration: BoxDecoration(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.05),
+                        color: theme.colorScheme.primary.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(AppRadius.m),
-                        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.1)),
+                        border: Border.all(color: theme.colorScheme.primary.withValues(alpha: 0.15)),
                       ),
                       child: Column(
                         children: [
-                          _billRow(context, 'Net Bill', '₵${widget.totalAmount.toStringAsFixed(2)}', theme),
-                          const SizedBox(height: 4),
+                          _billRow(context, 'Total Invoice', '₵${widget.totalAmount.toStringAsFixed(2)}', theme),
+                          const SizedBox(height: 6),
                           _billRow(context, 'Balance Due', '₵${remaining.toStringAsFixed(2)}', theme, 
                             color: remaining > 0 ? Colors.red : Colors.green, isBold: true),
                         ],
@@ -2279,38 +2384,54 @@ class _PaymentDialogState extends ConsumerState<PaymentDialog> {
                     
                     // Compact Method Selector
                     Row(
-                      children: PaymentMethod.values.map((m) => Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          child: InkWell(
-                            onTap: () => setState(() => _selectedMethod = m),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              decoration: BoxDecoration(
-                                color: _selectedMethod == m ? theme.colorScheme.primary : Colors.transparent,
-                                borderRadius: BorderRadius.circular(AppRadius.s),
-                                border: Border.all(color: _selectedMethod == m ? theme.colorScheme.primary : theme.dividerColor),
-                              ),
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    m == PaymentMethod.cash ? Icons.money_rounded : 
-                                    (m == PaymentMethod.mobileMoney ? Icons.smartphone_rounded : Icons.account_balance_rounded),
-                                    color: _selectedMethod == m ? Colors.white : theme.colorScheme.primary,
-                                    size: 20,
-                                  ),
-                                  Text(
-                                    m.name.toUpperCase(),
-                                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: _selectedMethod == m ? Colors.white : theme.colorScheme.onSurface),
-                                  ),
-                                ],
+                      children: PaymentMethod.values.map((m) {
+                        final isSelected = _selectedMethod == m;
+                        String label = m.name.toUpperCase();
+                        if (m == PaymentMethod.mobileMoney) label = 'MOMO';
+                        if (m == PaymentMethod.bankDeposit) label = 'BANK';
+
+                        return Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: InkWell(
+                              onTap: () => setState(() => _selectedMethod = m),
+                              borderRadius: BorderRadius.circular(AppRadius.s),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: isSelected ? theme.colorScheme.primary : theme.colorScheme.surface,
+                                  borderRadius: BorderRadius.circular(AppRadius.s),
+                                  border: Border.all(color: isSelected ? theme.colorScheme.primary : theme.dividerColor),
+                                  boxShadow: isSelected ? [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.2), blurRadius: 4, offset: const Offset(0, 2))] : null,
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      m == PaymentMethod.cash ? Icons.money_rounded : 
+                                      (m == PaymentMethod.mobileMoney ? Icons.smartphone_rounded : Icons.account_balance_rounded),
+                                      color: isSelected ? Colors.white : theme.colorScheme.primary,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      label,
+                                      style: TextStyle(
+                                        fontSize: 10, 
+                                        fontWeight: FontWeight.w900, 
+                                        color: isSelected ? Colors.white : theme.colorScheme.onSurface,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      )).toList(),
+                        );
+                      }).toList(),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 24),
 
                     Form(
                       key: _formKey,
@@ -2414,29 +2535,47 @@ class _PaymentDialogState extends ConsumerState<PaymentDialog> {
                   ],
                 ),
               ),
-            ),
-            const Divider(height: 24),
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
-                ),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _payments.isEmpty ? null : () {
-                      Navigator.pop(context);
-                      widget.onComplete(_payments, _receiptUrl);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: theme.colorScheme.primary, 
-                      foregroundColor: Colors.white,
+              const Divider(height: 32),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                      ),
+                      child: Text('CANCEL', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold, letterSpacing: 1)),
                     ),
-                    child: const Text('COMPLETE'),
                   ),
-                ),
-              ],
-            ),
-          ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 3,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        widget.onComplete(_payments, _receiptUrl);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: theme.colorScheme.primary, 
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                      ),
+                      child: FittedBox(
+                        child: Text(
+                          _payments.isEmpty ? 'RECORD AS DEBT' : 'COMPLETE SALE', 
+                          style: const TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2553,6 +2692,13 @@ class _ReceiptSuccessDialogState extends State<ReceiptSuccessDialog> {
                   children: [
                     const Text('Mi CORAZON', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 1)),
                     const Text('Digital Copy', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                    if (widget.sale.balance > 0.01)
+                      Container(
+                        margin: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(color: Colors.orange.shade800, borderRadius: BorderRadius.circular(4)),
+                        child: const Text('DEBT / CREDIT SALE', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                      ),
                     const Divider(height: 24),
                     _receiptPreviewRow('Invoice ID', widget.sale.id.substring(widget.sale.id.length - 8).toUpperCase()),
                     _receiptPreviewRow('Cashier', widget.sale.cashierName.split(' ')[0]),

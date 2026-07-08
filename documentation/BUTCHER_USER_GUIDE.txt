@@ -19,5 +19,6 @@ The Butcher is the starting point of the "Farm to Fork" traceability chain. Your
 - Hygiene: Maintain the highest standards of cleanliness in the slaughterhouse and processing workstation.
 
 4. TIPS FOR SUCCESS
-- If the internet is down, the system will store your data locally (Offline Mode). Do not stop working; your records will sync automatically when the connection returns.
-- Always print a "Batch Label" immediately after intake so everyone knows which animal is which.
+- Operational Reports: Check the "Operational Reports" section regularly to monitor your production efficiency, yield rates, and waste trends.
+- Offline Mode: If the internet is down, the system will store your data locally. Do not stop working; your records will sync automatically when the connection returns.
+- Batch Labels: Always print a "Batch Label" immediately after intake so everyone knows which animal is which and where it came from.

@@ -2,22 +2,25 @@ MI~CORAZON FRESHMEAT BUTCHERY - SYSTEM DOCUMENTATION
 USER ROLE: CASHIER (RETAIL & CUSTOMER SERVICE)
 
 1. YOUR ROLE IN THE SYSTEM
-The Cashier is the face of Mi~Corazon and the final gatekeeper of the company's revenue. You are responsible for receiving stock from the butcher, processing sales accurately, and managing customer loyalty and debts.
+The Cashier is the face of Mi~Corazon and the final gatekeeper of the company's revenue. You are responsible for receiving stock from the butcher, processing sales accurately, managing customer loyalty, and tracking outstanding debts.
 
 2. CORE WORKFLOWS
-- Incoming Stock Verification: When meat arrives from the butcher house, scan the barcode attached to the package. This "unlocks" the stock and makes it available for sale on your POS screen.
-- Point of Sale (POS): Process customer orders efficiently. You can toggle between Retail and Wholesale prices depending on the customer's purchase volume.
-- Customer Management: Register every regular customer. Use the "Favorites" feature to automatically apply promotions to our most loyal clients.
-- Debt Tracking: If a customer has a balance, you MUST select their profile in the system before finalizing the sale. Record every partial payment accurately in the "Debt Tracker."
-- Sale Corrections: If you make a mistake in a transaction, use the "Request Correction" feature to notify the Admin. Explain the mistake clearly.
-- AI Support: Tap the Sparkles icon to ask the AI about shop policies, customer service tips, or how to handle complex payments.
+- Incoming Stock Verification: When meat arrives from the butcher house, go to "Verify Incoming Stock." You can use your device's camera (tap the camera icon) or an external scanner to scan the package barcode. This "unlocks" the stock for your POS.
+- Point of Sale (POS): Process customer orders efficiently. You can toggle between Retail and Wholesale prices in the top toolbar. Note: Changing the price mode will clear your current cart.
+- Customer Management: Register every regular customer. Loyal customers marked as "Favorites" automatically receive a 10% discount on their purchases.
+- Debt Tracking: If a customer has a balance, you MUST select their profile in the system before finalizing the sale. Record every partial payment accurately; the system will track the remaining balance automatically.
+- Sale Corrections: If a mistake is made after finalizing a sale, go to the Transaction Details and select "Request Correction." This notifies the Admin to review and rectify the record.
+- Daily Sales Report: You now have access to your daily performance. Check the "Daily Sales Report" in the menu to see your total revenue, discounts given, and top-selling products for the day.
+- AI Support: Tap the Sparkles icon in the top toolbar to ask the AI about shop policies, customer service tips, or how to handle complex payments.
 
 3. ETHICAL USAGE GUIDELINES
 - Financial Honesty: Ensure every payment (Cash, MoMo, or Bank Deposit) is recorded for its exact amount. Never bypass the system for a sale.
 - Stock Integrity: Do not sell items that have not been verified through the "Incoming Stock" scanner. This preserves the accuracy of our inventory logs.
 - Privacy: Maintain customer confidentiality. Phone numbers and purchase histories should never be shared outside of business requirements.
-- Transparency: Always offer the customer a receipt (digital or SMS) so they can verify their purchase and discounts.
+- Transparency: Always offer the customer a receipt (digital, SMS, or thermal print) so they can verify their purchase and discounts.
 
 4. TIPS FOR SUCCESS
-- Check the "System Alerts" on your dashboard regularly for low-stock warnings or incoming transfers.
-- In case of network failure, the POS will work in Offline Mode. Keep processing sales; they will sync with the Cloud as soon as you are back online.
+- System Alerts: Check the notification bell regularly for low-stock warnings or incoming stock transfers from the butcher.
+- Offline Mode: In case of network failure, the POS will work in Offline Mode. Keep processing sales; they will sync with the Cloud automatically when the connection returns.
+- Printing Receipts: Ensure your thermal printer is connected via Bluetooth/USB before starting your shift for instant receipt generation.
+- Account Security: Never share your login credentials. If you suspect your password has been compromised, use the "Forgot Password" feature on the login screen to reset it.

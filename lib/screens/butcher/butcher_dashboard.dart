@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
 import '../../core/utils.dart';
+import '../../core/uuid_utils.dart';
 import '../../widgets/kpi_card.dart';
 import '../../widgets/status_chip.dart';
 import '../../widgets/summary_row.dart';
@@ -12,6 +13,7 @@ import '../../models/butcher_models.dart';
 import '../../services/butcher_navigation_provider.dart';
 import '../../services/transfer_provider.dart';
 import '../../models/transfer_models.dart';
+import '../../services/user_provider.dart';
 
 class ButcherDashboard extends ConsumerWidget {
   const ButcherDashboard({super.key});
@@ -95,6 +97,8 @@ class ButcherDashboard extends ConsumerWidget {
                         children: [
                           _buildSmartInsights(logsAsync),
                           const SizedBox(height: AppSpacing.l),
+                          _buildQuickDispatch(context, ref),
+                          const SizedBox(height: AppSpacing.l),
                           _buildMeatSummary(logsAsync),
                           const SizedBox(height: AppSpacing.l),
                           _buildQuickActions(ref),
@@ -115,6 +119,8 @@ class ButcherDashboard extends ConsumerWidget {
                     ),
                     const SizedBox(height: AppSpacing.l),
                     _buildSmartInsights(logsAsync),
+                    const SizedBox(height: AppSpacing.l),
+                    _buildQuickDispatch(context, ref),
                     const SizedBox(height: AppSpacing.l),
                     _buildMeatSummary(logsAsync),
                     const SizedBox(height: AppSpacing.l),
@@ -140,17 +146,27 @@ class ButcherDashboard extends ConsumerWidget {
       return now.subtract(Duration(days: 6 - index));
     });
 
-    final dailyCounts = last7Days.map((date) {
-      return logs.where((l) {
+    final dailyData = last7Days.map((date) {
+      final dayLogs = logs.where((l) {
         final logDate = l.slaughterTime ?? DateTime.now();
         return logDate.year == date.year && logDate.month == date.month && logDate.day == date.day;
-      }).length;
+      }).toList();
+      
+      final Map<AnimalType, int> typeCounts = {};
+      for (var log in dayLogs) {
+        typeCounts[log.type] = (typeCounts[log.type] ?? 0) + 1;
+      }
+      return typeCounts;
     }).toList();
 
-    final maxCount = dailyCounts.isEmpty ? 10 : (dailyCounts.reduce((a, b) => a > b ? a : b) + 2);
+    final dailyTotals = dailyData.map((d) => d.values.fold(0, (sum, v) => sum + v)).toList();
+    final maxCount = dailyTotals.isEmpty ? 10 : (dailyTotals.reduce((a, b) => a > b ? a : b) + 2);
+
+    // Get all unique animal types present in the logs for the legend
+    final presentTypes = logs.map((l) => l.type).toSet().toList();
 
     return Container(
-      height: 300,
+      height: 350, // Slightly taller for legend
       padding: const EdgeInsets.all(AppSpacing.l),
       decoration: BoxDecoration(
         color: theme.cardTheme.color,
@@ -173,7 +189,7 @@ class ButcherDashboard extends ConsumerWidget {
                     Text('Slaughter Trend', 
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface),
                       maxLines: 1, overflow: TextOverflow.ellipsis),
-                    Text('Animals processed daily', 
+                    Text('Daily breakdown by animal type', 
                       style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                   ],
@@ -191,10 +207,10 @@ class ButcherDashboard extends ConsumerWidget {
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(dailyCounts.length, (index) {
-                final count = dailyCounts[index];
+              children: List.generate(dailyData.length, (index) {
+                final typeCounts = dailyData[index];
+                final total = dailyTotals[index];
                 final date = last7Days[index];
-                final double barHeight = count == 0 ? 5 : (count / maxCount) * 140;
                 final isToday = index == 6;
 
                 return Expanded(
@@ -202,16 +218,26 @@ class ButcherDashboard extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       FittedBox(
-                        child: Text(count > 0 ? '$count' : '', 
+                        child: Text(total > 0 ? '$total' : '', 
                           style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isToday ? AppColors.primaryMaroon : theme.colorScheme.onSurfaceVariant)),
                       ),
                       const SizedBox(height: 4),
                       Container(
                         margin: const EdgeInsets.symmetric(horizontal: 4),
-                        height: barHeight,
-                        decoration: BoxDecoration(
-                          color: isToday ? AppColors.primaryMaroon : AppColors.primaryMaroon.withValues(alpha: 0.3),
+                        constraints: const BoxConstraints(minHeight: 5),
+                        child: ClipRRect(
                           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: typeCounts.entries.map((entry) {
+                              final double segmentHeight = (entry.value / maxCount) * 140;
+                              return Container(
+                                height: segmentHeight,
+                                width: double.infinity,
+                                color: _getAnimalColor(entry.key),
+                              );
+                            }).toList(),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -229,9 +255,37 @@ class ButcherDashboard extends ConsumerWidget {
               }),
             ),
           ),
+          const SizedBox(height: 16),
+          // Legend
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: presentTypes.map((type) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(width: 8, height: 8, decoration: BoxDecoration(color: _getAnimalColor(type), shape: BoxShape.circle)),
+                const SizedBox(width: 4),
+                Text(type.displayName, style: TextStyle(fontSize: 8, color: theme.colorScheme.onSurfaceVariant)),
+              ],
+            )).toList(),
+          ),
         ],
       ),
     );
+  }
+
+  Color _getAnimalColor(AnimalType type) {
+    switch (type) {
+      case AnimalType.cow: return const Color(0xFF5D4037); // Brown
+      case AnimalType.bull: return const Color(0xFF212121); // Dark Gray/Black
+      case AnimalType.pig: return const Color(0xFFF06292); // Pink
+      case AnimalType.sheep: return const Color(0xFFFFB74D); // Light Orange
+      case AnimalType.goat: return const Color(0xFFE65100); // Dark Orange
+      case AnimalType.hardChicken: return const Color(0xFFFBC02D); // Yellow Gold
+      case AnimalType.softChicken: return const Color(0xFFFFF176); // Light Yellow
+      case AnimalType.turkey: return const Color(0xFF78909C); // Blue Gray
+      case AnimalType.rabbit: return const Color(0xFFBDBDBD); // Gray
+    }
   }
 
   Widget _buildSmartInsights(AsyncValue<List<SlaughterLog>> logsAsync) {
@@ -366,6 +420,156 @@ class ButcherDashboard extends ConsumerWidget {
     );
   }
 
+  Widget _buildQuickDispatch(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Card(
+      color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.l),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.flash_on, color: theme.colorScheme.primary, size: 20),
+                const SizedBox(width: 8),
+                const Text("Quick End-of-Day Dispatch", style: TextStyle(fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              "No meat should stay in the butcher house for more than a day. Push all processed meat to the coldroom or retail cashier.",
+              style: TextStyle(fontSize: 11, color: AppColors.textLight),
+            ),
+            const SizedBox(height: AppSpacing.m),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () => _showQuickDispatchDialog(context, ref),
+                icon: const Icon(Icons.send_to_mobile),
+                label: const Text("Push to Coldroom / Cashier"),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showQuickDispatchDialog(BuildContext context, WidgetRef ref) {
+    String? selectedCategory;
+    final meatTypeController = TextEditingController();
+    final weightController = TextEditingController();
+    String destinationType = 'COLDROOM'; // Default
+    final theme = Theme.of(context);
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Quick Meat Dispatch'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Choose meat type and weight that was recently butchered.', style: TextStyle(fontSize: 12)),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  decoration: const InputDecoration(labelText: 'Meat Category'),
+                  items: ['Beef', 'Pork', 'Chicken', 'Goat', 'Sheep', 'Rabbit'].map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
+                  onChanged: (v) => selectedCategory = v,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: meatTypeController,
+                  decoration: const InputDecoration(labelText: 'Specific Cut / Type', hintText: 'e.g. Standard Meat'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: weightController,
+                  decoration: const InputDecoration(labelText: 'Quantity (kg)', suffixText: 'kg'),
+                  keyboardType: TextInputType.number,
+                ),
+                const SizedBox(height: 16),
+                const Divider(),
+                const SizedBox(height: 12),
+                const Align(alignment: Alignment.centerLeft, child: Text('Destination:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                RadioGroup<String>(
+                  groupValue: destinationType,
+                  onChanged: (v) => setState(() => destinationType = v!),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: RadioListTile<String>(
+                          title: const Text('Coldroom', style: TextStyle(fontSize: 12)),
+                          value: 'COLDROOM',
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                        ),
+                      ),
+                      Expanded(
+                        child: RadioListTile<String>(
+                          title: const Text('Third Party', style: TextStyle(fontSize: 12)),
+                          value: 'THIRDPARTY',
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (destinationType == 'THIRDPARTY') ...[
+                  TextField(decoration: const InputDecoration(labelText: 'Customer/Vendor Name')),
+                  const SizedBox(height: 8),
+                  const Text('Payment must be confirmed by Cashier/CEO.', style: TextStyle(fontSize: 10, color: Colors.orange)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+            ElevatedButton(
+              onPressed: () async {
+                final weight = double.tryParse(weightController.text) ?? 0;
+                if (weight <= 0) return;
+
+                final user = ref.read(currentUserProvider);
+                
+                final String categoryPart = selectedCategory != null ? '$selectedCategory - ' : '';
+                final String cutPart = meatTypeController.text.isEmpty ? 'Standard Meat' : meatTypeController.text;
+
+                final transfer = StockTransfer(
+                  id: UuidUtils.generate(),
+                  batchId: 'DIRECT-DAILY',
+                  meatType: '$categoryPart$cutPart',
+                  weight: weight,
+                  branchCode: user?.branchCode, // Set source branch
+                  destination: destinationType == 'COLDROOM' ? (user?.branchCode ?? 'MAIN') : 'THIRDPARTY',
+                  transferTime: DateTime.now(),
+                  status: destinationType == 'THIRDPARTY' ? TransferStatus.awaitingPayment : TransferStatus.pending,
+                  isThirdParty: destinationType == 'THIRDPARTY',
+                );
+
+                await ref.read(transferProvider.notifier).addTransfer(transfer);
+                
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Meat Dispatched! Cashier and CEO notified.')));
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, foregroundColor: Colors.white),
+              child: const Text('DISPATCH NOW'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildKPIGrid(double maxWidth, List<SlaughterLog> logs, List<MeatBatch> batches, List<Map<String, dynamic>> wasteRecords) {
     final completedCount = logs.where((l) => 
       l.status == SlaughterStatus.completed || 
@@ -442,8 +646,8 @@ class ButcherDashboard extends ConsumerWidget {
                       DataColumn(label: Text('Status', style: TextStyle(fontSize: 11))),
                     ],
                     rows: logs.take(5).map((log) => DataRow(cells: [
-                      DataCell(SizedBox(width: 80, child: Text(log.id, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))),
-                      DataCell(SizedBox(width: 80, child: Text(log.animalId, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))),
+                      DataCell(SizedBox(width: 80, child: Text(log.tagNumber ?? log.id.substring(0, 8), style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))),
+                      DataCell(SizedBox(width: 80, child: Text(log.manualFarmTag ?? log.animalId.substring(0, 8), style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))),
                       DataCell(Text(log.type.displayName, style: const TextStyle(fontSize: 11))),
                       DataCell(Text(
                         log.slaughterTime != null 
@@ -530,8 +734,8 @@ class ButcherDashboard extends ConsumerWidget {
               ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.animalIntake);
             }),
             const SizedBox(height: AppSpacing.s),
-            _buildActionBtn('Print Batch Labels', Icons.print, false, () {
-              ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.batchManagement);
+            _buildActionBtn('Transfer Stock', Icons.local_shipping_outlined, false, () {
+              ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.stockTransfer);
             }),
             const SizedBox(height: AppSpacing.s),
             _buildActionBtn('Record Waste', Icons.delete_sweep, false, () {

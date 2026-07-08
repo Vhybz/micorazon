@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
+import '../../core/uuid_utils.dart';
 import '../../widgets/status_chip.dart';
 import '../../models/butcher_models.dart';
 import '../../services/butcher_service.dart';
-import '../../services/butcher_navigation_provider.dart';
 import '../../services/label_service.dart';
 import '../../services/sms_service.dart';
 import '../../models/transfer_models.dart';
 import '../../services/transfer_provider.dart';
 import '../../services/branch_provider.dart';
+import '../../services/butcher_navigation_provider.dart';
 
 class MeatProcessingScreen extends ConsumerStatefulWidget {
   const MeatProcessingScreen({super.key});
@@ -20,7 +22,6 @@ class MeatProcessingScreen extends ConsumerStatefulWidget {
 }
 
 class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
-  String _historySearchQuery = '';
 
   @override
   Widget build(BuildContext context) {
@@ -28,6 +29,8 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     final slaughterLogsAsync = ref.watch(slaughterLogsProvider);
     final activeBatchesAsync = ref.watch(meatBatchesProvider);
     final recentCutsAsync = ref.watch(recentCutsProvider);
+    final recentCuts = recentCutsAsync.value ?? [];
+    final wasteRecords = ref.watch(butcherWasteProvider).value ?? [];
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
@@ -36,6 +39,16 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
         backgroundColor: theme.cardColor,
         elevation: 0,
         actions: [
+          IconButton(
+            onPressed: () {
+              final batches = activeBatchesAsync.value ?? [];
+              if (batches.isNotEmpty) {
+                LabelService.printMultipleBatchLabels(batches);
+              }
+            },
+            icon: const Icon(Icons.print_outlined),
+            tooltip: 'Print All Active Labels',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
@@ -68,7 +81,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
               _buildStatsHeader(slaughterLogsAsync, activeBatchesAsync),
               const SizedBox(height: AppSpacing.xl),
               
-              _buildSectionHeader('1. CARCASS PIPELINE (Awaiting Receipt)', Icons.local_shipping_rounded),
+              _buildSectionHeader('1. CARCASS PIPELINE (Awaiting Breakdown)', Icons.local_shipping_rounded),
               const SizedBox(height: AppSpacing.m),
               slaughterLogsAsync.when(
                 data: (logs) {
@@ -85,11 +98,22 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
               const SizedBox(height: AppSpacing.m),
               activeBatchesAsync.when(
                 data: (batches) {
-                  final processing = batches.where((b) => 
-                    b.status != 'completed' && 
-                    b.status != 'frozen' &&
-                    b.status != 'packaging'
-                  ).toList();
+                  // NEW LOGIC: A batch stays in the processing section if it has any weight left to dispatch,
+                  // even if it was manually marked as 'completed'.
+                  final processing = batches.where((b) {
+                    final status = b.status.toLowerCase();
+                    
+                    // Check remaining weight
+                    final batchCuts = recentCuts.where((c) => c.batchId == b.id).toList();
+                    final batchWaste = wasteRecords.where((w) => w['batch_id'] == b.id).toList();
+                    final accounted = batchCuts.fold(0.0, (sum, c) => sum + c.weight) + 
+                                     batchWaste.fold(0.0, (sum, w) => sum + (double.tryParse(w['weight']?.toString() ?? '0') ?? 0));
+                    final hasWeightLeft = accounted < (b.weight - 0.1); // 100g tolerance
+
+                    // Section 2 Logic: Show if in active status OR if completed but has weight left
+                    final isActiveStatus = ['preparing', 'mincing', 'cutting', 'received', 'transporting'].contains(status);
+                    return isActiveStatus || (status == 'completed' && hasWeightLeft);
+                  }).toList();
                   
                   if (processing.isEmpty) {
                     return _buildEmptyPlaceholder(theme, 'No active batches. Go to Slaughter Log to start a breakdown.');
@@ -105,12 +129,12 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
               const SizedBox(height: AppSpacing.m),
               activeBatchesAsync.when(
                 data: (batches) {
-                  final packaging = batches.where((b) => 
-                    b.status == 'packaging' || 
-                    b.status == 'frozen'
-                  ).toList();
-                  if (packaging.isEmpty) return const SizedBox.shrink();
-                  return _buildPackagingSection(ref, packaging);
+                  final packaging = batches.where((b) {
+                    final status = b.status.toLowerCase();
+                    return status == 'packaging' || status == 'frozen' || status == 'completed';
+                  }).toList();
+                  if (packaging.isEmpty) return _buildEmptyPlaceholder(theme, 'No batches ready for dispatch.');
+                  return _buildPackagingSection(context, ref, packaging);
                 },
                 loading: () => const SizedBox.shrink(),
                 error: (err, _) => const SizedBox.shrink(),
@@ -120,6 +144,12 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
               _buildSectionHeader('PRODUCTION HISTORY (Today)', Icons.history),
               const SizedBox(height: AppSpacing.m),
               _buildHistorySummary(recentCutsAsync),
+              const SizedBox(height: AppSpacing.m),
+              recentCutsAsync.when(
+                data: (cuts) => _buildCutProductionList(context, cuts.take(10).toList()),
+                loading: () => const SizedBox.shrink(),
+                error: (error, stackTrace) => const SizedBox.shrink(),
+              ),
               const SizedBox(height: 100),
             ],
           ),
@@ -144,6 +174,15 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
           Text(message, 
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: theme.disabledColor)),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: () {
+              ref.read(slaughterLogsProvider.notifier).loadLogs();
+              ref.read(meatBatchesProvider.notifier).loadBatches();
+            }, 
+            icon: const Icon(Icons.refresh, size: 16), 
+            label: const Text('Refresh Data', style: TextStyle(fontSize: 11)),
+          ),
         ],
       ),
     );
@@ -233,7 +272,6 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
   }
 
   Widget _buildAwaitingReceiveList(BuildContext context, WidgetRef ref, List<SlaughterLog> logs) {
-    final theme = Theme.of(context);
     final awaiting = logs.where((l) => l.status == SlaughterStatus.completed).toList();
     if (awaiting.isEmpty) return const Text('No carcasses awaiting transport.', style: TextStyle(color: Colors.grey, fontSize: 12, fontStyle: FontStyle.italic));
 
@@ -334,11 +372,18 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
               backgroundColor: AppColors.primaryMaroon.withValues(alpha: 0.1),
               child: Icon(_getAnimalIcon(batch.meatType), color: AppColors.primaryMaroon, size: 20),
             ),
-            title: Text(batch.meatType, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-            subtitle: Row(
+            title: Text(batch.meatType, 
+              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text('BATCH: ${batch.id.substring(0,8)}', style: const TextStyle(fontSize: 10, fontFamily: 'monospace')),
-                const SizedBox(width: 8),
+                Text('BATCH: ${batch.id.substring(0,8)}', 
+                  style: const TextStyle(fontSize: 10, fontFamily: 'monospace', fontWeight: FontWeight.bold)
+                ),
                 StatusChip(
                   label: batch.status.toUpperCase(), 
                   color: batch.status == MeatBatchStatus.preparing.name ? Colors.orange : Colors.blue,
@@ -359,25 +404,38 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                           icon: const Icon(Icons.print, size: 18, color: AppColors.primaryMaroon),
                           onPressed: () => LabelService.printBatchLabel(batch),
                           tooltip: 'Print Batch Label',
+                          constraints: const BoxConstraints(),
+                          padding: EdgeInsets.zero,
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _workflowAction(ref, batch, Icons.restaurant, 'PREP', MeatBatchStatus.preparing),
-                        _workflowAction(ref, batch, Icons.bolt, 'MINCE', MeatBatchStatus.mincing),
-                        _workflowAction(ref, batch, Icons.content_cut, 'CUT', MeatBatchStatus.cutting),
-                        _workflowAction(ref, batch, Icons.inventory_2, 'PACK', MeatBatchStatus.packaging),
-                      ],
+                    const SizedBox(height: 12),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        return Wrap(
+                          alignment: WrapAlignment.spaceAround,
+                          spacing: 16,
+                          runSpacing: 12,
+                          children: [
+                            _workflowAction(ref, batch, Icons.restaurant, 'PREP', MeatBatchStatus.preparing),
+                            _workflowAction(ref, batch, Icons.bolt, 'MINCE', MeatBatchStatus.mincing),
+                            _workflowAction(ref, batch, Icons.content_cut, 'CUT', MeatBatchStatus.cutting),
+                            _workflowAction(ref, batch, Icons.inventory_2, 'PACK', MeatBatchStatus.packaging),
+                          ],
+                        );
+                      }
                     ),
                     const Divider(height: 32),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('CARCASS BREAKDOWN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.grey)),
-                        Text('Total Intake: ${batch.weight} kg', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        Flexible(
+                          child: Text('Total Intake: ${batch.weight} kg', 
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -393,9 +451,15 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                           children: [
                             const Icon(Icons.check_circle, size: 14, color: Colors.green),
                             const SizedBox(width: 8),
-                            Expanded(child: Text(cut.name, style: const TextStyle(fontSize: 13))),
+                            Expanded(
+                              child: Text(cut.name, 
+                                style: const TextStyle(fontSize: 13),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
                             Text('${cut.weight} kg', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 8),
                             IconButton(
                               icon: const Icon(Icons.print, size: 16, color: Colors.grey),
                               onPressed: () => LabelService.printCutLabel(cut),
@@ -412,9 +476,17 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                           children: [
                             const Icon(Icons.delete_outline, size: 14, color: Colors.orange),
                             const SizedBox(width: 8),
-                            const Expanded(child: Text('Recorded Waste/Bones', style: TextStyle(fontSize: 12, color: Colors.orange))),
-                            Text('${wastedWeight.toStringAsFixed(1)} kg', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 13)),
-                            const SizedBox(width: 28), // Match printer icon width
+                            const Expanded(
+                              child: Text('Recorded Waste/Bones', 
+                                style: TextStyle(fontSize: 12, color: Colors.orange),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text('${wastedWeight.toStringAsFixed(1)} kg', 
+                              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 13)
+                            ),
+                            const SizedBox(width: 24), // Spacer for align
                           ],
                         ),
                       ),
@@ -422,8 +494,13 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('${(progress * 100).toStringAsFixed(0)}% Accounted', 
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: progress > 0.95 ? Colors.green : AppColors.primaryMaroon)),
+                        Flexible(
+                          child: Text('${(progress * 100).toStringAsFixed(0)}% Accounted', 
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: progress > 0.95 ? Colors.green : AppColors.primaryMaroon),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Text('${totalAccounted.toStringAsFixed(1)} / ${batch.weight} kg', 
                           style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
                       ],
@@ -436,33 +513,48 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                       minHeight: 10,
                       borderRadius: BorderRadius.circular(5),
                     ),
-                    const SizedBox(height: 20),
-                    Row(
+                    const SizedBox(height: 24),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        Expanded(
+                        SizedBox(
+                          width: 130,
                           child: OutlinedButton.icon(
                             onPressed: () => _showRecordWasteDialog(context, ref, batch),
-                            icon: const Icon(Icons.delete_outline),
-                            label: const Text('LOG WASTE'),
-                            style: OutlinedButton.styleFrom(foregroundColor: Colors.orange, side: const BorderSide(color: Colors.orange)),
+                            icon: const Icon(Icons.delete_outline, size: 16),
+                            label: const Text('WASTE', style: TextStyle(fontSize: 11)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.orange, 
+                              side: const BorderSide(color: Colors.orange),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
+                        SizedBox(
+                          width: 130,
                           child: OutlinedButton.icon(
                             onPressed: () => _showQuickDispatchDialog(context, ref, batch),
-                            icon: const Icon(Icons.rocket_launch_outlined),
-                            label: const Text('DISPATCH'),
-                            style: OutlinedButton.styleFrom(foregroundColor: Colors.blue, side: const BorderSide(color: Colors.blue)),
+                            icon: const Icon(Icons.rocket_launch_outlined, size: 16),
+                            label: const Text('DISPATCH', style: TextStyle(fontSize: 11)),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.blue, 
+                              side: const BorderSide(color: Colors.blue),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
+                        SizedBox(
+                          width: 130,
                           child: ElevatedButton.icon(
                             onPressed: () => _showRecordCutDialog(context, ref, initialBatch: batch),
-                            icon: const Icon(Icons.add),
-                            label: const Text('ADD PART'),
-                            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryMaroon, foregroundColor: Colors.white),
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('ADD PART', style: TextStyle(fontSize: 11)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primaryMaroon, 
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                            ),
                           ),
                         ),
                       ],
@@ -495,15 +587,14 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     }
     final availableCuts = animalType?.standardCuts ?? [];
     String? selectedCut;
-    String _dispatchTarget = 'BRANCH'; // 'BRANCH' or 'INDIVIDUAL'
-    String? _selectedBranchCode;
+    String dispatchTarget = 'BRANCH'; // 'BRANCH' or 'INDIVIDUAL'
+    String? selectedBranchCode;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) {
-          final theme = Theme.of(context);
           final branchesAsync = ref.watch(branchesProvider);
 
           return AlertDialog(
@@ -536,6 +627,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                       controller: weightController,
                       decoration: const InputDecoration(labelText: 'Weight (kg)', border: OutlineInputBorder(), suffixText: 'kg'),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                     ),
                     const Divider(height: 40),
                     
@@ -546,32 +638,32 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                         Expanded(
                           child: ChoiceChip(
                             label: const Center(child: Text('Branch')),
-                            selected: _dispatchTarget == 'BRANCH',
-                            onSelected: (v) => setState(() => _dispatchTarget = 'BRANCH'),
+                            selected: dispatchTarget == 'BRANCH',
+                            onSelected: (v) => setState(() => dispatchTarget = 'BRANCH'),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: ChoiceChip(
                             label: const Center(child: Text('Individual')),
-                            selected: _dispatchTarget == 'INDIVIDUAL',
-                            onSelected: (v) => setState(() => _dispatchTarget = 'INDIVIDUAL'),
+                            selected: dispatchTarget == 'INDIVIDUAL',
+                            onSelected: (v) => setState(() => dispatchTarget = 'INDIVIDUAL'),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 20),
 
-                    if (_dispatchTarget == 'BRANCH')
+                    if (dispatchTarget == 'BRANCH')
                       branchesAsync.when(
                         data: (branches) => DropdownButtonFormField<String>(
                           isExpanded: true,
                           decoration: const InputDecoration(labelText: 'Select Destination Branch', border: OutlineInputBorder()),
                           items: branches.map((b) => DropdownMenuItem(value: b.code, child: Text(b.name))).toList(),
-                          onChanged: (v) => setState(() => _selectedBranchCode = v),
+                          onChanged: (v) => setState(() => selectedBranchCode = v),
                         ),
                         loading: () => const LinearProgressIndicator(),
-                        error: (_, __) => const Text('Error loading branches'),
+                        error: (error, stackTrace) => const Text('Error loading branches'),
                       )
                     else ...[
                       TextField(
@@ -600,11 +692,11 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                 onPressed: () async {
                   final weight = double.tryParse(weightController.text) ?? 0;
                   if (selectedCut == null || weight <= 0) return;
-                  if (_dispatchTarget == 'BRANCH' && _selectedBranchCode == null) return;
-                  if (_dispatchTarget == 'INDIVIDUAL' && nameController.text.isEmpty) return;
+                  if (dispatchTarget == 'BRANCH' && selectedBranchCode == null) return;
+                  if (dispatchTarget == 'INDIVIDUAL' && nameController.text.isEmpty) return;
 
                   final now = DateTime.now();
-                  final id = '00000000-0000-0000-0000-${now.millisecondsSinceEpoch.toString().substring(3)}';
+                  final id = UuidUtils.generate();
 
                   // 1. Create the MeatCut
                   final cut = MeatCut(
@@ -624,9 +716,9 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                     batchId: batch.id,
                     meatType: '${batch.meatType} - $selectedCut',
                     weight: weight,
-                    destination: _dispatchTarget == 'BRANCH' ? _selectedBranchCode! : 'PRIVATE_ORDER',
+                    destination: dispatchTarget == 'BRANCH' ? selectedBranchCode! : 'PRIVATE_ORDER',
                     transferTime: now,
-                    isIndividual: _dispatchTarget == 'INDIVIDUAL',
+                    isIndividual: dispatchTarget == 'INDIVIDUAL',
                     customerName: nameController.text.trim(),
                     customerPhone: phoneController.text.trim(),
                     customerLocation: locationController.text.trim(),
@@ -638,7 +730,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                   await LabelService.printCutLabel(cut);
 
                   // 3. Send SMS if individual order
-                  if (_dispatchTarget == 'INDIVIDUAL' && phoneController.text.isNotEmpty) {
+                  if (dispatchTarget == 'INDIVIDUAL' && phoneController.text.isNotEmpty) {
                     try {
                       await SmsService.sendDispatchSms(
                         name: nameController.text.trim(),
@@ -656,7 +748,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('Successfully dispatched $weight kg to ${_dispatchTarget == 'BRANCH' ? _selectedBranchCode : nameController.text}'),
+                        content: Text('Successfully dispatched $weight kg to ${dispatchTarget == 'BRANCH' ? selectedBranchCode : nameController.text}'),
                         backgroundColor: Colors.green,
                       ),
                     );
@@ -673,6 +765,17 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     );
   }
 
+  Widget _miniInfo(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: Colors.grey),
+        const SizedBox(width: 4),
+        Text(text, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+      ],
+    );
+  }
+
   IconData _getAnimalIcon(String type) {
     final t = type.toLowerCase();
     if (t.contains('cow') || t.contains('bull') || t.contains('beef')) return Icons.pets;
@@ -684,7 +787,13 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
   Widget _workflowAction(WidgetRef ref, MeatBatch batch, IconData icon, String label, MeatBatchStatus targetStatus) {
     final isActive = batch.status == targetStatus.name;
     return InkWell(
-      onTap: () => ref.read(meatBatchesProvider.notifier).updateBatchProcessingStatus(batch.id, targetStatus),
+      onTap: () {
+        if (targetStatus == MeatBatchStatus.packaging) {
+          _showPackingSummaryDialog(context, ref, batch);
+        } else {
+          ref.read(meatBatchesProvider.notifier).updateBatchProcessingStatus(batch.id, targetStatus);
+        }
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
@@ -702,44 +811,171 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     );
   }
 
-  Widget _buildPackagingSection(WidgetRef ref, List<MeatBatch> packaging) {
-    if (packaging.isEmpty) return const Text('No batches currently being packaged.', style: TextStyle(color: Colors.grey, fontSize: 12, fontStyle: FontStyle.italic));
+  void _showPackingSummaryDialog(BuildContext context, WidgetRef ref, MeatBatch batch) {
+    final recentCuts = ref.read(recentCutsProvider).value ?? [];
+    final wasteRecords = ref.read(butcherWasteProvider).value ?? [];
+    final batchCuts = recentCuts.where((c) => c.batchId == batch.id).toList();
+    final batchWaste = wasteRecords.where((w) => w['batch_id'] == batch.id).toList();
+    
+    final processedWeight = batchCuts.fold(0.0, (sum, c) => sum + c.weight);
+    final wastedWeight = batchWaste.fold(0.0, (sum, w) => sum + (double.tryParse(w['weight']?.toString() ?? '0') ?? 0));
+    final totalAccounted = processedWeight + wastedWeight;
+    final progress = (totalAccounted / batch.weight).clamp(0.0, 1.0);
 
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: packaging.length,
-      itemBuilder: (context, index) {
-        final batch = packaging[index];
-        final isFrozen = batch.status == MeatBatchStatus.frozen.name;
+    showDialog(
+      context: context,
+      builder: (context) {
+        final bool isMobile = MediaQuery.of(context).size.width < 600;
+        final theme = Theme.of(context);
         
-        return Card(
-          margin: const EdgeInsets.only(bottom: 8),
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m), side: BorderSide(color: Colors.grey.shade200)),
-          child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.m, vertical: 4),
-            leading: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: isFrozen ? Colors.cyan.withValues(alpha: 0.1) : Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-              child: Icon(isFrozen ? Icons.ac_unit : Icons.inventory_2, color: isFrozen ? Colors.cyan : Colors.blue),
-            ),
-            title: Text('${batch.meatType} - Batch ${batch.id.substring(0,8)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-            subtitle: Text('Status: ${batch.status.toUpperCase()} • ${batch.weight}kg', style: const TextStyle(fontSize: 11)),
-            trailing: Row(
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+          child: Container(
+            width: isMobile ? MediaQuery.of(context).size.width * 0.95 : 450,
+            padding: const EdgeInsets.all(AppSpacing.l),
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (!isFrozen)
-                  IconButton(
-                    icon: const Icon(Icons.ac_unit_rounded, color: Colors.cyan),
-                    tooltip: 'Move to Freezing',
-                    onPressed: () => ref.read(meatBatchesProvider.notifier).updateBatchProcessingStatus(batch.id, MeatBatchStatus.frozen),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.m),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryMaroon.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(AppRadius.m),
                   ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () => _confirmCloseBatch(context, ref, batch),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, elevation: 0, padding: const EdgeInsets.symmetric(horizontal: 16)),
-                  child: const Text('READY FOR SALE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.inventory_2, color: AppColors.primaryMaroon, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Packaging Confirmation', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.primary)),
+                            Text('${batch.meatType} | Batch: ${batch.id.substring(0, 8)}', style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                
+                // Yield Metrics
+                Row(
+                  children: [
+                    Expanded(child: _metricBox('INTAKE', '${batch.weight}kg', Colors.blue)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _metricBox('PACKED', '${totalAccounted.toStringAsFixed(1)}kg', Colors.green)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _metricBox('YIELD', '${(progress * 100).toStringAsFixed(0)}%', progress > 0.9 ? Colors.green : Colors.orange)),
+                  ],
+                ),
+                
+                const SizedBox(height: 24),
+                const Align(alignment: Alignment.centerLeft, child: Text('PACKED ITEMS DETAIL', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 10, letterSpacing: 1, color: Colors.grey))),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(AppSpacing.s),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(AppRadius.m),
+                    border: Border.all(color: Colors.grey.withValues(alpha: 0.1)),
+                  ),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: isMobile ? 180 : 250),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: batchCuts.length,
+                      itemBuilder: (context, index) {
+                        final cut = batchCuts[index];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                              const SizedBox(width: 12),
+                              Expanded(child: Text(cut.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
+                              Text('${cut.weight}kg', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                if (wastedWeight > 0) ...[
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.delete_outline, size: 16, color: Colors.orange),
+                        const SizedBox(width: 12),
+                        const Expanded(child: Text('Operational Waste (Bones/Fat)', style: TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.w500))),
+                        Text('${wastedWeight.toStringAsFixed(1)}kg', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 12)),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 24),
+                Column(
+                  children: [
+                    LinearProgressIndicator(
+                      value: progress,
+                      backgroundColor: Colors.grey.shade100,
+                      color: progress > 0.95 ? Colors.green : AppColors.primaryMaroon,
+                      minHeight: 10,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    const SizedBox(height: 8),
+                    Text('${(progress * 100).toStringAsFixed(1)}% of carcass accounted for', style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.grey)),
+                  ],
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      // 1. Mark as completed
+                      await ref.read(meatBatchesProvider.notifier).updateBatchProcessingStatus(batch.id, MeatBatchStatus.completed);
+                      
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        
+                        // 2. Navigate to Batch Management for Dispatch preparation
+                        ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.batchManagement);
+                        
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Batch finalized! Now preparing for Stock Transfer.'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.verified_rounded),
+                    label: const Text('FINALIZE & TRANSFER', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primaryMaroon, 
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Back to Workstation', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+                  ),
                 ),
               ],
             ),
@@ -749,7 +985,114 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     );
   }
 
-  Widget _buildCutProductionList(List<MeatCut> cuts) {
+  Widget _metricBox(String label, String value, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        border: Border.all(color: color.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        children: [
+          Text(label, style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: color, letterSpacing: 0.5)),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: color.withValues(alpha: 0.9))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPackagingSection(BuildContext context, WidgetRef ref, List<MeatBatch> packaging) {
+    if (packaging.isEmpty) return _buildEmptyPlaceholder(Theme.of(context), 'No batches in packaging. Use the PACK duty above to move them here.');
+
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: packaging.length,
+      itemBuilder: (context, index) {
+        final batch = packaging[index];
+        final isFrozen = batch.status == MeatBatchStatus.frozen.name;
+        
+        return Container(
+          margin: const EdgeInsets.only(bottom: AppSpacing.m),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(AppRadius.m),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10)],
+            border: Border.all(color: isFrozen ? Colors.cyan.withValues(alpha: 0.3) : Colors.blue.withValues(alpha: 0.3)),
+          ),
+          child: IntrinsicHeight(
+            child: Row(
+              children: [
+                Container(
+                  width: 6,
+                  decoration: BoxDecoration(
+                    color: isFrozen ? Colors.cyan : Colors.blue,
+                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(AppRadius.m), bottomLeft: Radius.circular(AppRadius.m)),
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.l),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(isFrozen ? Icons.ac_unit : Icons.inventory_2, color: isFrozen ? Colors.cyan : Colors.blue, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(child: Text(batch.meatType.toUpperCase(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16))),
+                            StatusChip(label: batch.status.toUpperCase(), color: isFrozen ? Colors.cyan : Colors.blue),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 16,
+                          runSpacing: 4,
+                          children: [
+                            _miniInfo(Icons.tag, 'BATCH: ${batch.id.substring(0,8)}'),
+                            _miniInfo(Icons.scale, '${batch.weight}kg Total'),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        Row(
+                          children: [
+                            if (!isFrozen)
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () => ref.read(meatBatchesProvider.notifier).updateBatchProcessingStatus(batch.id, MeatBatchStatus.frozen),
+                                  icon: const Icon(Icons.ac_unit_rounded, size: 16),
+                                  label: const Text('FREEZE', style: TextStyle(fontSize: 11)),
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.cyan, side: const BorderSide(color: Colors.cyan)),
+                                ),
+                              )
+                            else
+                              const Expanded(child: SizedBox.shrink()),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _showQuickDispatchDialog(context, ref, batch),
+                                icon: const Icon(Icons.local_shipping_rounded, size: 16),
+                                label: const Text('DISPATCH NOW', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white, elevation: 0),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCutProductionList(BuildContext context, List<MeatCut> cuts) {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
@@ -822,6 +1165,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                 suffixText: 'kg',
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
             ),
           ],
         ),
@@ -904,63 +1248,6 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     );
   }
 
-  void _confirmCloseBatch(BuildContext context, WidgetRef ref, MeatBatch batch) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Finalize Batch?'),
-        content: Text('Confirm that processing for Batch ${batch.id.substring(0,8)} is complete and items are ready for the Sales floor.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              ref.read(meatBatchesProvider.notifier).closeBatch(batch.id);
-              Navigator.pop(context);
-              _showCompletionDialog(context, ref);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-            child: const Text('Finalize Production'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showCompletionDialog(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-        title: const Row(
-          children: [
-            Icon(Icons.verified_rounded, color: Colors.green),
-            SizedBox(width: 12),
-            Text('Production Complete'),
-          ],
-        ),
-        content: const Text('The batch has been successfully processed. You can now view the final yield audit in Batch Management or proceed to Stock Transfer.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context), 
-            child: const Text('Close')
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.batchManagement);
-            },
-            icon: const Icon(Icons.layers_rounded, size: 18),
-            label: const Text('BATCH MANAGEMENT', style: TextStyle(fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryMaroon, 
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   void _showRecordCutDialog(BuildContext context, WidgetRef ref, {MeatBatch? initialBatch}) {
     final formKey = GlobalKey<FormState>();
     final weightController = TextEditingController();
@@ -1037,6 +1324,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                       controller: weightController,
                       decoration: const InputDecoration(labelText: 'Weight (kg)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.scale)), 
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                       validator: (v) {
                         if (v == null || v.isEmpty) return 'Required';
                         final weight = double.tryParse(v);
@@ -1053,9 +1341,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
               ElevatedButton(
                 onPressed: () async {
                   if (formKey.currentState!.validate()) {
-                    final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-                    final String suffix = timestamp.substring(timestamp.length - 12);
-                    final String validUuid = '00000000-0000-0000-0000-$suffix';
+                    final String validUuid = UuidUtils.generate();
 
                     final cut = MeatCut(
                       id: validUuid,
@@ -1137,6 +1423,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                 controller: weightController,
                 decoration: const InputDecoration(labelText: 'Weight (kg)', border: OutlineInputBorder()),
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                 validator: (v) => (double.tryParse(v ?? '') == null) ? 'Required' : null,
               ),
             ],

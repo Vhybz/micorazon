@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/customer_metrics.dart';
+import '../models/sale_model.dart';
 import 'customer_provider.dart';
 import 'sale_provider.dart';
 
@@ -19,6 +20,7 @@ final customerMetricsProvider = Provider<Map<String, CustomerMetric>>((ref) {
       metrics[customer.phone] = CustomerMetric(
         customerPhone: customer.phone,
         totalSpend: 0,
+        totalDebt: 0,
         visitCount: 0,
         averageOrderValue: 0,
         recentSpends: [],
@@ -27,6 +29,7 @@ final customerMetricsProvider = Provider<Map<String, CustomerMetric>>((ref) {
     }
 
     final totalSpend = customerSales.fold(0.0, (sum, s) => sum + s.totalAmount);
+    final totalDebt = customerSales.fold(0.0, (sum, s) => sum + (s.status != SaleStatus.cancelled ? s.balance : 0));
     final visitCount = customerSales.length;
     final lastVisit = customerSales.last.timestamp;
     final recentSpends = customerSales.map((s) => s.totalAmount).toList();
@@ -34,6 +37,7 @@ final customerMetricsProvider = Provider<Map<String, CustomerMetric>>((ref) {
     metrics[customer.phone] = CustomerMetric(
       customerPhone: customer.phone,
       totalSpend: totalSpend,
+      totalDebt: totalDebt,
       visitCount: visitCount,
       averageOrderValue: totalSpend / visitCount,
       lastVisit: lastVisit,

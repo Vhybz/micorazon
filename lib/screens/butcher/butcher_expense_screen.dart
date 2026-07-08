@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
+import '../../core/uuid_utils.dart';
 import '../../services/expense_provider.dart';
 import '../../models/expense_model.dart';
 
@@ -170,9 +171,7 @@ class ButcherExpenseScreen extends ConsumerWidget {
             ElevatedButton(
               onPressed: () {
                 if (formKey.currentState!.validate()) {
-                  final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-                  final String suffix = timestamp.substring(timestamp.length - 12);
-                  final String validUuid = '00000000-0000-0000-0000-$suffix';
+                  final String validUuid = UuidUtils.generate();
 
                   final newExp = ExpenseRecord(
                     id: validUuid,

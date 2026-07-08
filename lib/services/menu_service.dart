@@ -3,9 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets/app_sidebar.dart';
 import '../models/user_model.dart';
 import 'user_provider.dart';
+import 'transfer_provider.dart';
 
 class MenuService {
-  static List<SidebarItem> getMenuItemsForUser(UserAccount user, {bool inButcherShell = false}) {
+  static List<SidebarItem> getMenuItemsForUser(UserAccount user, {bool inButcherShell = false, int? pendingTransfersCount}) {
     final List<SidebarItem> items = [];
     final roles = user.activeRoles;
     
@@ -15,16 +16,17 @@ class MenuService {
     // List of all possible admin items
     final List<SidebarItem> adminItems = [
       SidebarItem(icon: Icons.dashboard_rounded, label: 'Admin Dashboard', route: '/admin'),
+      SidebarItem(icon: Icons.admin_panel_settings_rounded, label: 'Staff Management', route: '/admin/staff'),
       SidebarItem(icon: Icons.bar_chart_rounded, label: 'Sales Analytics', route: '/admin/sales'),
       SidebarItem(icon: Icons.inventory_2_rounded, label: 'Master Stock Control', route: '/admin/stock'),
       SidebarItem(icon: Icons.account_balance_wallet_rounded, label: 'Debt Tracker', route: '/admin/debts'),
       SidebarItem(icon: Icons.receipt_long_rounded, label: 'Business Expenses', route: '/admin/expenses'),
       SidebarItem(icon: Icons.people_outline_rounded, label: 'Customer Directory', route: '/admin/customers'),
       SidebarItem(icon: Icons.account_balance_rounded, label: 'GRA Tax Compliance', route: '/admin/tax'),
-      SidebarItem(icon: Icons.people_alt_rounded, label: 'Staff Management', route: '/admin/users'),
       SidebarItem(icon: Icons.payments_rounded, label: 'Salary Management', route: '/admin/salaries'),
       SidebarItem(icon: Icons.folder_open_rounded, label: 'Compliance Documents', route: '/admin/documents'),
       SidebarItem(icon: Icons.history_rounded, label: 'Company Recents', route: '/admin/recents'),
+      SidebarItem(icon: Icons.qr_code_scanner_rounded, label: 'Verify Incoming Stock', route: '/cashier/verify-stock'),
       SidebarItem(icon: Icons.build_circle_rounded, label: 'System Maintenance', route: '/admin/maintenance'),
     ];
 
@@ -38,6 +40,7 @@ class MenuService {
             label: item.label,
             route: item.route,
             isCatchy: user.newlyAddedPermissions.contains(item.route),
+            badgeCount: item.route == '/cashier/verify-stock' ? pendingTransfersCount : null,
           ));
           continue;
         }
@@ -48,6 +51,7 @@ class MenuService {
                                   item.route == '/admin/tax' ||
                                   item.route == '/admin/documents' ||
                                   item.route == '/admin/salaries' ||
+                                  item.route == '/admin/staff' ||
                                   item.route == '/admin/recents' || 
                                   item.route == '/admin/maintenance' ||
                                   item.route == '/admin/settings';
@@ -61,6 +65,7 @@ class MenuService {
             label: item.label,
             route: item.route,
             isCatchy: user.newlyAddedPermissions.contains(item.route),
+            badgeCount: item.route == '/cashier/verify-stock' ? pendingTransfersCount : null,
           ));
         }
       }
@@ -74,6 +79,7 @@ class MenuService {
             label: item.label,
             route: item.route,
             isCatchy: user.newlyAddedPermissions.contains(item.route),
+            badgeCount: item.route == '/cashier/verify-stock' ? pendingTransfersCount : null,
           ));
         }
       }
@@ -90,6 +96,13 @@ class MenuService {
         label: 'Cashier POS', 
         route: '/cashier', 
         isCatchy: user.newlyAddedPermissions.contains('/cashier'),
+      ));
+
+      items.add(SidebarItem(
+        icon: Icons.qr_code_scanner_rounded,
+        label: 'Verify Incoming Stock',
+        route: '/cashier/verify-stock',
+        badgeCount: (pendingTransfersCount ?? 0) > 0 ? pendingTransfersCount : null,
       ));
       
       // NEW: Cashiers get Daily Sales Report access
@@ -156,7 +169,7 @@ class MenuService {
       {'route': '/admin/debts', 'label': 'Debt Tracker'},
       {'route': '/admin/stock', 'label': 'Master Stock Control'},
       {'route': '/admin/salaries', 'label': 'Salary Management'},
-      {'route': '/admin/users', 'label': 'Staff Management'},
+      {'route': '/admin/staff', 'label': 'Staff Management'},
       {'route': '/admin/recents', 'label': 'Company Recents'},
       {'route': '/admin/maintenance', 'label': 'System Maintenance'},
       {'route': '/cashier', 'label': 'Cashier POS Access'},
@@ -196,12 +209,14 @@ class MenuService {
 final menuItemsProvider = Provider<List<SidebarItem>>((ref) {
   final user = ref.watch(currentUserProvider);
   if (user == null) return [];
-  return MenuService.getMenuItemsForUser(user);
+  final pendingCount = ref.watch(pendingIncomingTransfersProvider).length;
+  return MenuService.getMenuItemsForUser(user, pendingTransfersCount: pendingCount);
 });
 
 /// A reactive provider for butcher unit menu items
 final butcherMenuItemsProvider = Provider<List<SidebarItem>>((ref) {
   final user = ref.watch(currentUserProvider);
   if (user == null) return [];
-  return MenuService.getMenuItemsForUser(user, inButcherShell: true);
+  final pendingCount = ref.watch(pendingIncomingTransfersProvider).length;
+  return MenuService.getMenuItemsForUser(user, inButcherShell: true, pendingTransfersCount: pendingCount);
 });

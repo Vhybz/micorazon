@@ -1,32 +1,59 @@
-MI~CORAZON FRESHMEAT BUTCHERY - GENERAL SYSTEM OVERVIEW
+========================================================================
+MI~CORAZON FRESHMEAT BUTCHERY MANAGEMENT SYSTEM - PROJECT OVERVIEW
+========================================================================
 
-1. WHAT IS THIS APP?
-In simple terms, this is a "Digital Brain" for Mi~Corazon. It is an all-in-one management system that tracks everything in our business—from the moment a live animal is purchased at a farm to the moment a customer walks away with a bag of meat and a receipt.
+1. PROJECT REPOSITORY
+---------------------
+URL: https://github.com/Vhybz/meat.git
+Branch: main
 
-2. THE "JOURNEY OF THE MEAT" (HOW IT WORKS)
-The app follows the natural flow of our butchery:
-- THE FARM: We record the weight and cost of every animal we buy. This gives us "Farm to Fork" traceability.
-- THE SLAUGHTERHOUSE: The butcher manages his tasks (slaughtering, cleaning, and cutting). The app makes sure the weight of the meat coming out matches the weight of the animal that went in. No meat "disappears" in the middle.
-- THE TRANSIT: Every package of meat is given a unique Barcode (like at a supermarket). This links the meat to its history.
-- THE SHOP: The cashier scans the barcode to "unlock" the meat for sale. This ensures the shop only sells what the butcher actually produced.
-- THE SALE: The cashier processes the sale on a tablet or computer, handling cash, MoMo, or debt, and sends a digital receipt to the customer.
 
-3. 21ST CENTURY BENEFITS: WHY WE STAND OUT
-While most butcheries in Ghana still rely on "guesswork" and handwritten notebooks, Mi~Corazon uses cutting-edge technology to dominate the market:
+2. CORE PURPOSE
+---------------
+Mi~Corazon is an end-to-end management system for a butchery enterprise.
+It automates the entire meat lifecycle: from slaughterhouse logging and
+carcass breakdown (yield math) to production floor processing,
+barcode label printing, and a high-speed Point-of-Sale (POS) with
+integrated bank deposit verification and GRA-compliant financial reporting.
 
-- WORLD-CLASS TRACEABILITY: We are one of the few butcheries in Ghana where you can trace a piece of meat on your plate back to the specific farm it came from. This builds immense trust and guarantees food safety.
-- DATA-DRIVEN DOMINANCE: The app provides real-time "Power Analytics." The owner knows exactly how much profit was made at 10:00 AM, which meat part is the crowd favorite, and which staff member is most efficient—all from a smartphone anywhere in the world.
-- ELIMINATION OF "LEAKAGE": In traditional shops, money and meat often "vanish." Our barcode-locked inventory makes it nearly impossible for a single gram of meat to be sold without being recorded. Every cedi is accounted for.
-- MODERN CUSTOMER EXPERIENCE: We treat our customers like VIPs. Our system remembers their names, their favorite cuts, and automatically manages their loyalty points and debts. No more "Who owes what?" arguments.
-- PAPERLESS EFFICIENCY: We have replaced messy stacks of paper with a sleek, digital interface. This reduces errors, saves costs, and makes our operations incredibly fast.
-- UNSTOPPABLE RELIABILITY (HYBRID CLOUD): Unlike other apps that crash when the internet fails, our system is "Ghana-Proof." It works perfectly offline and syncs to the cloud automatically when the connection returns. Your business never stops.
 
-4. THE FUTURE: MI~CORAZON AT YOUR DOORSTEP
-We aren't stopping at the shop counter. The next phase of our evolution will put the butchery directly into the pockets of our customers:
+3. TECHNICAL STACK
+------------------
+* Frontend: Flutter (SDK ^3.11.5)
+* State Management: flutter_riverpod (using riverpod_generator)
+* Backend: Supabase (Postgres, Realtime, Auth, Storage)
+* Local Data/Offline: Hive (Sync Queue), Drift (SQLite persistence)
+* Hardware: printing & pdf packages (Thermal labels/Receipts)
+* Notifications: Arkesel SMS Gateway Integration
 
-- REMOTE PURCHASING: Soon, customers will be able to browse our fresh inventory from their smartphones at home. No more walking to the shop only to find their favorite cut is sold out.
-- HOME DELIVERY: With a few taps, a customer can order their weekly meat supply and have it delivered directly to their doorstep, fresh and barcoded for verification.
-- "CLICK & COLLECT": Customers can pay remotely and download a digital receipt. They can then walk into the shop, show their phone, and claim their pre-packaged meat instantly—skipping the queue entirely.
 
-5. CONCLUSION: THE MI~CORAZON EDGE
-This app isn't just a tool; it's a statement. It transforms Mi~Corazon from a "local meat shop" into a high-tech "Smart Butchery." We are setting a standard for professionalism and transparency that is rare in West Africa. By combining traditional butchery skills with 21st-century software, we are building a business that is ready to scale across the nation with 100% confidence, control, and profit.
+4. VALIDATION FOCUS (PRIORITY REVIEW AREAS)
+-------------------------------------------
+* Offline-First Sync Engine (lib/services/offline_sync_service.dart):
+  Validation of the Hive-based queue and conflict resolution when
+  device reconnects with multiple pending updates.
+
+* Butcher Workflow (lib/screens/butcher/):
+  - Carcass Breakdown Station: Math logic verification for live-to-meat
+    weight conversion and yield tracking.
+  - State Lock Logic: Verification of _statusOverrides in
+    SlaughterLogNotifier to prevent UI flickering during background sync.
+
+* UI Resilience:
+  Validation of the Meat Processing screen's unified scrolling
+  architecture to ensure stable rendering on all mobile device sizes.
+
+
+5. DATABASE ARCHITECTURE (Key Entities)
+---------------------------------------
+* slaughter_logs: Farm-to-carcass traceability.
+* meat_batches: Production floor dissection tracking.
+* sales: Complex transaction storage using JSONB.
+* stock_transfers: Production-to-Sales movement auditing.
+
+
+Generated for Technical Review
+Date: June 2024
+========================================================================
+
+

@@ -6,6 +6,7 @@ class StockTransfer {
   final String batchId;
   final String meatType;
   final double weight;
+  final String unit; // Added for 'kg' vs 'Qty' support
   final String destination;
   final DateTime transferTime;
   final TransferStatus status;
@@ -22,6 +23,7 @@ class StockTransfer {
     required this.batchId,
     required this.meatType,
     required this.weight,
+    this.unit = 'kg', // Default to kg
     required this.destination,
     required this.transferTime,
     this.status = TransferStatus.pending,
@@ -33,22 +35,33 @@ class StockTransfer {
     this.customerLocation,
   });
 
-  factory StockTransfer.fromJson(Map<String, dynamic> json) {
+  factory StockTransfer.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
+    TransferStatus safeStatus(String? name) {
+      if (name == null) return TransferStatus.pending;
+      try {
+        return TransferStatus.values.byName(name.trim());
+      } catch (_) {
+        return TransferStatus.pending;
+      }
+    }
+
     return StockTransfer(
-      id: json['id'],
-      branchCode: json['branch_code'],
-      batchId: json['batch_id'],
-      meatType: json['meat_type'],
-      weight: (json['weight'] as num).toDouble(),
-      destination: json['destination'],
-      transferTime: DateTime.parse(json['transfer_time']),
-      status: TransferStatus.values.byName(json['status']),
-      isThirdParty: json['is_third_party'] ?? false,
-      isPaid: json['is_paid'] ?? false,
-      isIndividual: json['is_individual'] ?? false,
-      customerName: json['customer_name'],
-      customerPhone: json['customer_phone'],
-      customerLocation: json['customer_location'],
+      id: map['id']?.toString() ?? '',
+      branchCode: map['branch_code']?.toString(),
+      batchId: map['batch_id']?.toString() ?? 'DIRECT',
+      meatType: map['meat_type']?.toString() ?? 'Unknown Meat',
+      weight: double.tryParse(map['weight']?.toString() ?? '0') ?? 0.0,
+      unit: map['unit']?.toString() ?? 'kg',
+      destination: map['destination']?.toString() ?? 'Unknown',
+      transferTime: DateTime.tryParse(map['transfer_time'] ?? '') ?? DateTime.now(),
+      status: safeStatus(map['status']?.toString()),
+      isThirdParty: map['is_third_party'] == true,
+      isPaid: map['is_paid'] == true,
+      isIndividual: map['is_individual'] == true,
+      customerName: map['customer_name']?.toString(),
+      customerPhone: map['customer_phone']?.toString(),
+      customerLocation: map['customer_location']?.toString(),
     );
   }
 
@@ -59,6 +72,7 @@ class StockTransfer {
       'batch_id': batchId,
       'meat_type': meatType,
       'weight': weight,
+      'unit': unit,
       'destination': destination,
       'transfer_time': transferTime.toIso8601String(),
       'status': status.name,
@@ -80,13 +94,16 @@ class StockTransfer {
     String? customerPhone,
     String? customerLocation,
     String? branchCode,
+    String? unit,
+    double? weight,
   }) {
     return StockTransfer(
       id: id,
       branchCode: branchCode ?? this.branchCode,
       batchId: batchId,
       meatType: meatType,
-      weight: weight,
+      weight: weight ?? this.weight,
+      unit: unit ?? this.unit,
       destination: destination ?? this.destination,
       transferTime: transferTime,
       status: status ?? this.status,

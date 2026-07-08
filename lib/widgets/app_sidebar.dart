@@ -17,16 +17,18 @@ class SidebarItem {
   final String label;
   final String route;
   final bool isCatchy;
+  final int? badgeCount;
 
   SidebarItem({
     required this.icon, 
     required this.label, 
     required this.route,
     this.isCatchy = false,
+    this.badgeCount,
   });
 }
 
-class AppSidebar extends ConsumerWidget {
+class AppSidebar extends ConsumerStatefulWidget {
   final List<SidebarItem> items;
   final String currentRoute;
   final String userName;
@@ -45,10 +47,28 @@ class AppSidebar extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AppSidebar> createState() => _AppSidebarState();
+}
+
+class _AppSidebarState extends ConsumerState<AppSidebar> {
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final sidebarColor = isDark ? theme.colorScheme.surface : theme.colorScheme.primary;
+
+    final filteredItems = widget.items
+        .where((item) => item.label.toLowerCase().contains(_searchQuery.toLowerCase()))
+        .toList();
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
@@ -77,6 +97,7 @@ class AppSidebar extends ConsumerWidget {
               bottom: false,
               child: _buildLogo(),
             ),
+            _buildSearchBar(),
             const Divider(height: 1, color: Colors.white10),
             Expanded(
               child: SingleChildScrollView(
@@ -86,14 +107,22 @@ class AppSidebar extends ConsumerWidget {
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       padding: const EdgeInsets.symmetric(vertical: AppSpacing.m),
-                      itemCount: items.length,
+                      itemCount: filteredItems.length,
                       separatorBuilder: (context, index) => const SizedBox(height: 4),
                       itemBuilder: (context, index) {
-                        final item = items[index];
-                        final isSelected = currentRoute == item.route;
+                        final item = filteredItems[index];
+                        final isSelected = widget.currentRoute == item.route;
                         return _buildMenuItem(context, ref, item, isSelected);
                       },
                     ),
+                    if (filteredItems.isEmpty && _searchQuery.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(AppSpacing.l),
+                        child: Text(
+                          'No menu items found',
+                          style: TextStyle(color: Colors.white54, fontSize: 12, fontStyle: FontStyle.italic),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -150,6 +179,55 @@ class AppSidebar extends ConsumerWidget {
     );
   }
 
+  Widget _buildSearchBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.m, vertical: AppSpacing.s),
+      child: SizedBox(
+        height: 36,
+        child: TextField(
+          controller: _searchController,
+          onChanged: (value) {
+            setState(() {
+              _searchQuery = value;
+            });
+          },
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Search menu...',
+            hintStyle: const TextStyle(color: Colors.white54, fontSize: 13),
+            prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 18),
+            suffixIcon: _searchQuery.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear, color: Colors.white54, size: 16),
+                    onPressed: () {
+                      setState(() {
+                        _searchQuery = '';
+                        _searchController.clear();
+                      });
+                    },
+                  )
+                : null,
+            filled: true,
+            fillColor: Colors.white.withValues(alpha: 0.1),
+            contentPadding: EdgeInsets.zero,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadius.s),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadius.s),
+              borderSide: BorderSide.none,
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadius.s),
+              borderSide: const BorderSide(color: Colors.white24),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildMenuItem(BuildContext context, WidgetRef ref, SidebarItem item, bool isSelected) {
     final bool showCatchy = item.isCatchy && !isSelected;
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -165,11 +243,11 @@ class AppSidebar extends ConsumerWidget {
           }
           
           if (item.isCatchy) {
-            ref.read(userProvider.notifier).markPermissionAsSeen(userId, item.route);
+            ref.read(userProvider.notifier).markPermissionAsSeen(widget.userId, item.route);
           }
           
           Future.delayed(const Duration(milliseconds: 100), () {
-            if (onTap != null) onTap!(item.route);
+            if (widget.onTap != null) widget.onTap!(item.route);
           });
         },
         child: Container(
@@ -205,16 +283,20 @@ class AppSidebar extends ConsumerWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (showCatchy)
+              if (showCatchy || (item.badgeCount != null && item.badgeCount! > 0))
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.orangeAccent,
+                    color: item.badgeCount != null ? Colors.red : Colors.orangeAccent,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Text(
-                    'NEW',
-                    style: TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold),
+                  child: Text(
+                    item.badgeCount != null ? '${item.badgeCount}' : 'NEW',
+                    style: TextStyle(
+                      color: item.badgeCount != null ? Colors.white : Colors.black, 
+                      fontSize: 8, 
+                      fontWeight: FontWeight.bold
+                    ),
                   ),
                 ),
             ],
@@ -272,8 +354,8 @@ class AppSidebar extends ConsumerWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(user?.name ?? userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis),
-                  Text(user?.activePrimaryRole.name.toUpperCase() ?? userRole, style: const TextStyle(color: Colors.white60, fontSize: 11), overflow: TextOverflow.ellipsis),
+                  Text(user?.name ?? widget.userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis),
+                  Text(user?.activePrimaryRole.name.toUpperCase() ?? widget.userRole, style: const TextStyle(color: Colors.white60, fontSize: 11), overflow: TextOverflow.ellipsis),
                 ],
               ),
             ),

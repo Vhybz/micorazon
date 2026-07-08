@@ -23,4 +23,12 @@ class SupabaseTransferService {
         .update({'status': status.name})
         .eq('id', id);
   }
+
+  Stream<List<StockTransfer>> watchTransfers() {
+    return _client
+        .from('stock_transfers')
+        .stream(primaryKey: ['id'])
+        .order('transfer_time', ascending: false)
+        .map((data) => data.map((json) => StockTransfer.fromJson(json)).toList());
+  }
 }

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
 import '../services/user_provider.dart';
 import '../services/auth_provider.dart';
+import 'auth/password_recovery_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -298,6 +299,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       alignment: WrapAlignment.center,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
+                        TextButton(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (context) => PasswordRecoveryScreen()),
+                            );
+                          },
+                          child: const Text('Forgot Password?', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 10),
                         Text(AppStrings.noAccountText, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13)),
                         TextButton(
                           onPressed: () => Navigator.pushNamed(context, '/signup'),

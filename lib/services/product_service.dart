@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import '../core/uuid_utils.dart';
 import '../models/product.dart';
 import 'supabase_product_service.dart';
 import 'user_provider.dart';
@@ -10,6 +12,7 @@ import 'sms_service.dart';
 import 'audit_service.dart';
 import 'offline_sync_service.dart';
 import '../models/system_models.dart';
+import '../core/supabase_config.dart';
 
 abstract class ProductService {
   Future<List<Product>> getProducts(String branchCode);
@@ -25,6 +28,11 @@ abstract class ProductService {
 
 final productServiceProvider = Provider<ProductService>((ref) {
   return SupabaseProductService();
+});
+
+// Moved to top to resolve potential circular resolution issues
+final productsFutureProvider = StateNotifierProvider<ProductNotifier, AsyncValue<List<Product>>>((ref) {
+  return ProductNotifier(ref.watch(productServiceProvider), ref);
 });
 
 class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
@@ -112,12 +120,17 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
 
   void _checkStockAlerts(List<Product> products) {
     for (final product in products) {
-      if (!product.isDeleted && product.stockQuantity <= product.lowStockThreshold) {
+      if (!product.isDeleted && 
+          product.lastStockUpdate != null && // Avoid alerts for brand new/uninitialized items
+          product.stockQuantity <= product.lowStockThreshold) {
         final title = 'LOW STOCK ALERT: ${product.name}';
         final message = '${product.name} is below safety threshold (${product.stockQuantity}${product.unit} remaining).';
         
-        // Avoid duplicate notifications for the same state
-        final existing = ref.read(notificationProvider).any((n) => n.title == title && !n.isRead);
+        // Avoid duplicate notifications (don't check isRead, just existence)
+        // This prevents the alert from reappearing immediately after being cleared/read
+        final notifications = ref.read(notificationProvider);
+        final existing = notifications.any((n) => n.title == title);
+
         if (!existing) {
           ref.read(notificationProvider.notifier).addNotification(title, message);
           
@@ -140,19 +153,29 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
   }
 
   Future<void> addProduct(Product product) async {
+    final user = ref.read(currentUserProvider);
+    final productWithBranch = product.copyWith(branchCode: user?.branchCode);
+    
     try {
-      final user = ref.read(currentUserProvider);
-      final productWithBranch = product.copyWith(branchCode: user?.branchCode);
-      await _service.addProduct(productWithBranch);
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.addProduct(productWithBranch);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      // Use Offline Queue
+      await OfflineSyncService.addToQueue(
+        actionType: 'UPDATE_PRODUCT',
+        data: productWithBranch.toJson(),
+      );
       
-      // Update cache immediately
+      // Update local state immediately for responsiveness
       state.whenData((products) {
         final newList = [...products, productWithBranch];
         state = AsyncValue.data(newList);
         _saveToCache(newList);
       });
-    } catch (e) {
-      debugPrint('Add Product Error: $e');
     }
   }
 
@@ -160,8 +183,6 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
     try {
       final oldProduct = state.value?.firstWhere((p) => p.id == updatedProduct.id);
       
-      await _service.updateProduct(updatedProduct);
-
       // Audit Log
       await AuditService.log(
         ref: ref,
@@ -172,43 +193,78 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         newData: updatedProduct.toJson(),
       );
 
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateProduct(updatedProduct);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      await OfflineSyncService.addToQueue(
+        actionType: 'UPDATE_PRODUCT',
+        data: updatedProduct.toJson(),
+      );
+
       state.whenData((products) {
         final newList = products.map((p) => p.id == updatedProduct.id ? updatedProduct : p).toList();
         state = AsyncValue.data(newList);
         _saveToCache(newList);
       });
-    } catch (e) {
-      debugPrint('Update Product Error: $e');
     }
   }
 
   Future<void> deleteProduct(String id) async {
     try {
-      await _service.deleteProduct(id);
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.deleteProduct(id);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      await OfflineSyncService.addToQueue(
+        actionType: 'DELETE_PRODUCT',
+        data: {'id': id},
+      );
+
       state.whenData((products) {
         final newList = products.where((p) => p.id != id).toList();
         state = AsyncValue.data(newList);
         _saveToCache(newList);
       });
-    } catch (e) {
-      debugPrint('Delete Product Error: $e');
     }
   }
 
   Future<void> restoreProduct(String id) async {
-    state.whenData((products) {
-      state = AsyncValue.data(products.map((p) => p.id == id ? p.copyWith(isDeleted: false) : p).toList());
+    state.whenData((products) async {
+      final updated = products.map((p) => p.id == id ? p.copyWith(isDeleted: false) : p).toList();
+      state = AsyncValue.data(updated);
+      
+      final product = updated.firstWhere((p) => p.id == id);
+      await OfflineSyncService.addToQueue(
+        actionType: 'UPDATE_PRODUCT',
+        data: product.toJson(),
+      );
     });
   }
 
   Future<void> updateStock(String id, double quantityChange, {String reason = 'ADJUSTMENT', String? referenceId}) async {
     final products = state.value;
-    if (products == null) return;
+    final now = DateTime.now();
+    final user = ref.read(currentUserProvider);
 
     try {
-      final product = products.firstWhere((p) => p.id == id);
-      final now = DateTime.now();
+      Product? product;
+      if (products != null) {
+        product = products.where((p) => p.id == id).firstOrNull;
+      }
       
+      // If not in local state, fetch from remote to be sure
+      if (product == null) {
+        debugPrint('Product Engine: Product $id not in local state. Fetching from service...');
+        product = await _service.getProductById(id);
+      }
+
       double currentDailyAdded = product.dailyStockAdded;
       
       // Reset daily added if it's a new day
@@ -229,9 +285,44 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         lastStockUpdate: now,
       );
 
-      await _service.updateProduct(updatedProduct);
+      // 1. Update Remote - Atomic Increment for high concurrency (Multiple users)
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        // ATOMIC: Use database function to add to the existing quantity on the server
+        await SupabaseConfig.client.rpc('increment_stock', params: {
+          'p_id': id,
+          'p_amount': quantityChange,
+        });
+        
+        // Update metadata separately (last update time, daily added tracker)
+        // We don't include 'stock_quantity' in this update to prevent overwriting the RPC result
+        final metadata = {
+          'daily_stock_added': updatedProduct.dailyStockAdded,
+          'last_stock_update': updatedProduct.lastStockUpdate?.toIso8601String(),
+        };
+        
+        await SupabaseConfig.client
+            .from('products')
+            .update(metadata)
+            .eq('id', id);
+      } else {
+        await OfflineSyncService.addToQueue(
+          actionType: 'UPDATE_PRODUCT_STOCK',
+          data: {
+            'id': id,
+            'change_amount': quantityChange,
+            'timestamp': now.toIso8601String(),
+          },
+        );
+        
+        // Also send a general update for metadata (daily added, etc.)
+        await OfflineSyncService.addToQueue(
+          actionType: 'UPDATE_PRODUCT',
+          data: updatedProduct.toJson(),
+        );
+      }
       
-      // Audit Log for Stock Change
+      // 2. Audit Log for Stock Change
       await AuditService.log(
         ref: ref,
         action: 'STOCK_ADJUSTED',
@@ -240,10 +331,9 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         newData: {'change': quantityChange, 'new_total': newQuantity, 'reason': reason},
       );
 
-      // Log Stock History
-      final user = ref.read(currentUserProvider);
+      // 3. Log Stock History
       final historyEntry = StockHistory(
-        id: '00000000-0000-0000-0000-${DateTime.now().millisecondsSinceEpoch}',
+        id: UuidUtils.generate(),
         branchCode: user?.branchCode,
         productId: id,
         changeAmount: quantityChange,
@@ -258,14 +348,16 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         data: historyEntry.toJson(),
       );
 
-      state = AsyncValue.data(products.map((p) {
-        if (p.id == id) {
-          return updatedProduct;
-        }
-        return p;
-      }).toList());
+      // 4. Update local state immediately if available
+      if (products != null) {
+        state = AsyncValue.data(products.map((p) {
+          if (p.id == id) return updatedProduct;
+          return p;
+        }).toList());
+      }
     } catch (e) {
       debugPrint('Stock Update Error: $e');
+      rethrow;
     }
   }
 
@@ -277,7 +369,18 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
       
       try {
         for (var p in productsToUpdate) {
-          await _service.applyPromotion(p.id, percentage, start, end, target, customerTarget);
+          final data = {
+            'discount_percentage': percentage,
+            'promo_start': start.toIso8601String(),
+            'promo_end': end.toIso8601String(),
+            'promo_target': target.name,
+            'promo_customer_target': customerTarget.name,
+          };
+          
+          await OfflineSyncService.addToQueue(
+            actionType: 'PROMOTION',
+            data: {'id': p.id, 'data': data},
+          );
         }
         
         state = AsyncValue.data(products.map((p) {
@@ -303,7 +406,18 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
       try {
         for (var p in products) {
           if (p.discountPercentage > 0) {
-            await _service.applyPromotion(p.id, 0, null, null, PromoTarget.both, PromoCustomerTarget.all);
+            final data = {
+              'discount_percentage': 0,
+              'promo_start': null,
+              'promo_end': null,
+              'promo_target': PromoTarget.both.name,
+              'promo_customer_target': PromoCustomerTarget.all.name,
+            };
+            
+            await OfflineSyncService.addToQueue(
+              actionType: 'PROMOTION',
+              data: {'id': p.id, 'data': data},
+            );
           }
         }
         state = AsyncValue.data(products.map((p) => p.copyWith(
@@ -320,7 +434,19 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
   Future<void> removePromotion(String productId) async {
     state.whenData((products) async {
       try {
-        await _service.applyPromotion(productId, 0, null, null, PromoTarget.both, PromoCustomerTarget.all);
+        final data = {
+          'discount_percentage': 0,
+          'promo_start': null,
+          'promo_end': null,
+          'promo_target': PromoTarget.both.name,
+          'promo_customer_target': PromoCustomerTarget.all.name,
+        };
+        
+        await OfflineSyncService.addToQueue(
+          actionType: 'PROMOTION',
+          data: {'id': productId, 'data': data},
+        );
+
         state = AsyncValue.data(products.map((p) {
           if (p.id == productId) {
             return p.copyWith(
@@ -341,7 +467,14 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
     state.whenData((products) async {
       try {
         for (var p in products) {
-          await _service.updateStock(p.id, 0);
+          await OfflineSyncService.addToQueue(
+            actionType: 'UPDATE_PRODUCT_STOCK',
+            data: {
+              'id': p.id,
+              'change_amount': -p.stockQuantity,
+              'timestamp': DateTime.now().toIso8601String(),
+            },
+          );
         }
         state = AsyncValue.data(products.map((p) => p.copyWith(stockQuantity: 0)).toList());
       } catch (e) {
@@ -354,7 +487,3 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
     return await _service.uploadProductImage(bytes, fileName);
   }
 }
-
-final productsFutureProvider = StateNotifierProvider<ProductNotifier, AsyncValue<List<Product>>>((ref) {
-  return ProductNotifier(ref.watch(productServiceProvider), ref);
-});

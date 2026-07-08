@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:http/http.dart' as http;
+import 'dart:typed_data';
+import 'package:file_picker/file_picker.dart';
+
 import '../../core/constants.dart';
-import '../../services/report_service.dart';
 import '../../widgets/main_app_bar.dart';
 import '../../widgets/app_sidebar.dart';
 import '../../services/menu_service.dart';
 import '../../services/user_provider.dart';
-import '../../services/sale_provider.dart';
-import '../../services/expense_provider.dart';
 import '../../widgets/responsive_layout.dart';
 import '../../models/user_model.dart';
-import '../../models/sale_model.dart';
+import '../../models/document_model.dart';
+import '../../services/document_provider.dart';
 
 class DocumentsScreen extends ConsumerWidget {
   final bool isNested;
@@ -26,111 +29,82 @@ class DocumentsScreen extends ConsumerWidget {
     final isDesktop = ResponsiveLayout.isDesktop(context);
     final bool isAdmin = user.activeRoles.contains(UserRole.admin) || user.activeRoles.contains(UserRole.superAdmin);
     
-    // We only want the Scaffold if we are in the Admin route and NOT nested in another shell
     final bool showScaffold = isAdmin && !isNested;
     
     final String currentRoute = isAdmin ? '/admin/documents' : 'butcher:documents';
     final menuItems = ref.watch(isAdmin ? menuItemsProvider : butcherMenuItemsProvider);
 
-    // Data for GRA Tax Report
-    final now = DateTime.now();
-    final allSales = ref.watch(saleHistoryProvider);
-    final allExpenses = ref.watch(expenseProvider).records;
-
-    final monthlySales = allSales.where((s) => 
-      s.status != SaleStatus.cancelled &&
-      s.timestamp.month == now.month && 
-      s.timestamp.year == now.year
-    ).toList();
-
-    final monthlyExpenses = allExpenses.where((e) => 
-      e.date.month == now.month && e.date.year == now.year
-    ).toList();
-
-    final totalSales = monthlySales.fold(0.0, (sum, s) => sum + s.totalAmount);
-    final totalExpenses = monthlyExpenses.fold(0.0, (sum, e) => sum + e.amount);
-    final grossProfit = totalSales - totalExpenses;
-
-    // GRA Tax Logic
-    final double taxExclusiveBase = totalSales / 1.219;
-    final double nhil = taxExclusiveBase * 0.025;
-    final double getFund = taxExclusiveBase * 0.025;
-    final double covid = taxExclusiveBase * 0.01;
-    final double taxableValueForVat = taxExclusiveBase + nhil + getFund + covid;
-    final double vat = taxableValueForVat * 0.15;
-    final double totalTax = nhil + getFund + covid + vat;
+    final documents = ref.watch(documentProvider);
 
     Widget content = SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.l),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final double cardWidth = constraints.maxWidth < 600 ? (constraints.maxWidth - 48) / 2 : (constraints.maxWidth - 64) / 4;
-              return Wrap(
-                spacing: AppSpacing.s,
-                runSpacing: AppSpacing.s,
-                children: [
-                  _buildCategoryCard('Compliance', Icons.verified_user, Colors.green, cardWidth),
-                  _buildCategoryCard('Permits', Icons.article, Colors.blue, cardWidth),
-                  _buildCategoryCard('Invoices', Icons.receipt_long, Colors.orange, cardWidth),
-                  _buildCategoryCard('Logbooks', Icons.book, Colors.purple, cardWidth),
-                ],
-              );
-            }
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Compliance Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+                    Text('View and manage regulatory certifications', style: TextStyle(color: AppColors.textLight, fontSize: 12)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.m),
+              ElevatedButton.icon(
+                onPressed: () => _showUploadDialog(context, ref),
+                icon: const Icon(Icons.upload_file),
+                label: const Text('Upload Document'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          const Text('Compliance & Operating Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: AppSpacing.m),
-          Card(
-            child: Column(
-              children: [
-                _buildDocItem(
-                  'GRA Tax Compliance Report', 
-                  'Monthly Profit & Tax Breakdown (${DateFormat('MMMM').format(now)})', 
-                  'Calculated', 
-                  AppColors.primaryMaroon,
-                  onTap: () => ReportService.generateTaxComplianceReport(
-                    date: now,
-                    totalSales: totalSales,
-                    totalExpenses: totalExpenses,
-                    grossProfit: grossProfit,
-                    taxBreakdown: {
-                      'NHIL': nhil,
-                      'GETFund': getFund,
-                      'COVID': covid,
-                      'VAT': vat,
-                      'TOTAL': totalTax,
-                    },
-                  ),
+          if (documents.isEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(40.0),
+                child: Column(
+                  children: [
+                    Icon(Icons.folder_open, size: 64, color: theme.dividerColor),
+                    const SizedBox(height: 16),
+                    Text(
+                      user.branchCode == null 
+                        ? 'Branch code missing. Please update your profile.' 
+                        : 'No documents uploaded yet for branch ${user.branchCode}.', 
+                      style: const TextStyle(color: AppColors.textLight),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
-                const Divider(height: 1),
-                _buildDocItem(
-                  'Health Inspection Certificate 2024', 
-                  'Official GRA & Health Dept Approval', 
-                  'Verified', 
-                  Colors.green,
-                  onTap: () => ReportService.generateHealthCertificate(),
-                ),
-                const Divider(height: 1),
-                _buildDocItem(
-                  'Standard Slaughter SOP v2.1', 
-                  'Step-by-step butchery standards', 
-                  'Active', 
-                  Colors.blue,
-                  onTap: () => ReportService.generateSlaughterSOP(),
-                ),
-                const Divider(height: 1),
-                _buildDocItem(
-                  'GRA Meat Retail License', 
-                  'Business operating permit', 
-                  'Active', 
-                  Colors.purple,
-                  onTap: () {},
-                ),
-              ],
+              ),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: documents.length,
+              itemBuilder: (context, index) {
+                final doc = documents[index];
+                return _buildDocCard(context, ref, doc);
+              }
             ),
+          const SizedBox(height: AppSpacing.xl),
+          const Text('Generated Reports', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          const SizedBox(height: AppSpacing.m),
+          _buildDocItem(
+            context,
+            'GRA Tax Compliance Report', 
+            'Monthly Profit & Tax Breakdown', 
+            'System Generated', 
+            AppColors.primaryMaroon,
+            onTap: () {},
           ),
         ],
       ),
@@ -170,47 +144,333 @@ class DocumentsScreen extends ConsumerWidget {
     return content;
   }
 
-  Widget _buildDocItem(String title, String subtitle, String tag, Color tagColor, {required VoidCallback onTap}) {
-    return ListTile(
-      leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
-      title: Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-      subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: tagColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
+  Widget _buildDocCard(BuildContext context, WidgetRef ref, DocumentRecord doc) {
+    final theme = Theme.of(context);
+    final fileName = doc.fileUrl.split('?').first.toLowerCase();
+    final isImage = fileName.endsWith('.jpg') || fileName.endsWith('.png') || fileName.endsWith('.jpeg') || fileName.endsWith('.webp');
+    final isPdf = fileName.endsWith('.pdf');
+    final isDoc = fileName.endsWith('.doc') || fileName.endsWith('.docx');
+    final isExcel = fileName.endsWith('.xls') || fileName.endsWith('.xlsx');
+
+    IconData fileIcon = Icons.description;
+    Color iconColor = theme.colorScheme.primary;
+
+    if (isPdf) {
+      fileIcon = Icons.picture_as_pdf;
+      iconColor = Colors.red;
+    } else if (isDoc) {
+      fileIcon = Icons.article;
+      iconColor = Colors.blue;
+    } else if (isExcel) {
+      fileIcon = Icons.table_chart;
+      iconColor = Colors.green;
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppSpacing.m),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _viewDocument(doc),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isImage)
+              SizedBox(
+                height: 120,
+                width: double.infinity,
+                child: Image.network(
+                  doc.fileUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    color: Colors.grey.shade100,
+                    child: const Icon(Icons.broken_image, color: Colors.grey),
+                  ),
+                ),
+              )
+            else
+              Container(
+                height: 80,
+                width: double.infinity,
+                color: iconColor.withValues(alpha: 0.05),
+                child: Icon(fileIcon, color: iconColor, size: 32),
+              ),
+            ListTile(
+              contentPadding: const EdgeInsets.all(AppSpacing.m),
+              title: Text(doc.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 4),
+                  Text(doc.description, style: const TextStyle(fontSize: 12)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.calendar_today, size: 10, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Text(DateFormat('MMM dd, yyyy').format(doc.createdAt), style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                    ],
+                  ),
+                ],
+              ),
+              trailing: PopupMenuButton<String>(
+                onSelected: (value) => _handleAction(context, ref, doc, value),
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'view', child: Row(children: [Icon(Icons.visibility, size: 18), SizedBox(width: 8), Text('View')])),
+                  const PopupMenuItem(value: 'update', child: Row(children: [Icon(Icons.edit, size: 18), SizedBox(width: 8), Text('Update')])),
+                  const PopupMenuItem(value: 'download', child: Row(children: [Icon(Icons.download, size: 18), SizedBox(width: 8), Text('Download')])),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: Colors.red, size: 18), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.red))])),
+                ],
+              ),
             ),
-            child: Text(tag, style: TextStyle(color: tagColor, fontSize: 10, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(width: 8),
-          const Icon(Icons.download, size: 20, color: AppColors.textLight),
-        ],
+          ],
+        ),
       ),
-      onTap: onTap,
     );
   }
 
-  Widget _buildCategoryCard(String title, IconData icon, Color color, double width) {
-    return SizedBox(
-      width: width,
-      child: Card(
-        margin: EdgeInsets.zero,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.m),
-          child: Column(
-            children: [
-              Icon(icon, color: color, size: 28),
-              const SizedBox(height: 8),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), textAlign: TextAlign.center),
-              Text(title == 'Compliance' ? 'Verified' : 'Access', style: const TextStyle(color: AppColors.textLight, fontSize: 11)),
-            ],
+  Widget _buildDocItem(BuildContext context, String title, String subtitle, String tag, Color tagColor, {required VoidCallback onTap}) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+        title: Text(
+          title, 
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          subtitle, 
+          style: const TextStyle(fontSize: 11),
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: tagColor.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(tag, style: TextStyle(color: tagColor, fontSize: 10, fontWeight: FontWeight.bold)),
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
+
+  void _handleAction(BuildContext context, WidgetRef ref, DocumentRecord doc, String action) {
+    switch (action) {
+      case 'view':
+        _viewDocument(doc);
+        break;
+      case 'update':
+        _showUpdateDialog(context, ref, doc);
+        break;
+      case 'download':
+        _downloadDocument(context, doc);
+        break;
+      case 'delete':
+        _confirmDelete(context, ref, doc);
+        break;
+    }
+  }
+
+  Future<void> _viewDocument(DocumentRecord doc) async {
+    final url = Uri.parse(doc.fileUrl);
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _downloadDocument(BuildContext context, DocumentRecord doc) async {
+    try {
+      final response = await http.get(Uri.parse(doc.fileUrl));
+      if (response.statusCode == 200) {
+        final bytes = response.bodyBytes;
+        final fileName = doc.fileUrl.split('/').last.split('?').first;
+        
+        final String? path = await FilePicker.platform.saveFile(
+          fileName: fileName,
+          bytes: bytes,
+        );
+
+        if (path != null && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('File saved to: $path')),
+          );
+        }
+      } else {
+        throw Exception('Failed to fetch file from server');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error downloading file: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  void _confirmDelete(BuildContext context, WidgetRef ref, DocumentRecord doc) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Delete'),
+        content: Text('Are you sure you want to delete "${doc.title}"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              await ref.read(documentProvider.notifier).deleteDocument(doc);
+              if (context.mounted) Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showUploadDialog(BuildContext context, WidgetRef ref) {
+    final titleController = TextEditingController();
+    final descController = TextEditingController();
+    Uint8List? fileBytes;
+    String? fileName;
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: !isSaving,
+      builder: (context) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Upload Document'),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: titleController, decoration: const InputDecoration(labelText: 'Title', hintText: 'e.g. Sanitary Certificate')),
+                TextField(controller: descController, decoration: const InputDecoration(labelText: 'Description', hintText: 'Briefly describe the document')),
+                const SizedBox(height: 20),
+                OutlinedButton.icon(
+                  onPressed: isSaving ? null : () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(
+                      type: FileType.any,
+                      withData: true,
+                    );
+                    
+                    if (result != null && result.files.single.bytes != null) {
+                      fileBytes = result.files.single.bytes;
+                      fileName = result.files.single.name;
+                      setDialogState(() {});
+                    }
+                  }, 
+                  icon: const Icon(Icons.attach_file),
+                  label: Text(fileName ?? 'Select File'),
+                ),
+                if (isSaving)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 16.0),
+                    child: LinearProgressIndicator(),
+                  ),
+              ],
+            ),
           ),
         ),
-      ),
+        actions: [
+          TextButton(onPressed: isSaving ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: (isSaving || fileBytes == null || titleController.text.isEmpty) ? null : () async {
+              setDialogState(() => isSaving = true);
+              try {
+                await ref.read(documentProvider.notifier).uploadAndAddDocument(fileBytes!, fileName!, titleController.text, descController.text);
+                if (context.mounted) Navigator.pop(context);
+              } catch (e) {
+                setDialogState(() => isSaving = false);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e'), backgroundColor: Colors.red));
+                }
+              }
+            }, 
+            child: const Text('Upload'),
+          ),
+        ],
+      )),
+    );
+  }
+
+  void _showUpdateDialog(BuildContext context, WidgetRef ref, DocumentRecord doc) {
+    final titleController = TextEditingController(text: doc.title);
+    final descController = TextEditingController(text: doc.description);
+    Uint8List? fileBytes;
+    String? fileName;
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: !isSaving,
+      builder: (context) => StatefulBuilder(builder: (context, setDialogState) => AlertDialog(
+        title: const Text('Update Document'),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: titleController, decoration: const InputDecoration(labelText: 'Title')),
+                TextField(controller: descController, decoration: const InputDecoration(labelText: 'Description')),
+                const SizedBox(height: 20),
+                Text('Current File: ${doc.fileUrl.split('/').last.split('?').first}', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: isSaving ? null : () async {
+                    FilePickerResult? result = await FilePicker.platform.pickFiles(
+                      type: FileType.any,
+                      withData: true,
+                    );
+                    
+                    if (result != null && result.files.single.bytes != null) {
+                      fileBytes = result.files.single.bytes;
+                      fileName = result.files.single.name;
+                      setDialogState(() {});
+                    }
+                  }, 
+                  icon: const Icon(Icons.change_circle),
+                  label: Text(fileName ?? 'Replace File (Optional)'),
+                ),
+                if (isSaving)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 16.0),
+                    child: LinearProgressIndicator(),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: isSaving ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: isSaving ? null : () async {
+              setDialogState(() => isSaving = true);
+              try {
+                await ref.read(documentProvider.notifier).updateDocument(
+                  doc, 
+                  newBytes: fileBytes, 
+                  newFileName: fileName,
+                  title: titleController.text,
+                  description: descController.text,
+                );
+                if (context.mounted) Navigator.pop(context);
+              } catch (e) {
+                setDialogState(() => isSaving = false);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Update failed: $e'), backgroundColor: Colors.red));
+                }
+              }
+            }, 
+            child: const Text('Save Changes'),
+          ),
+        ],
+      )),
     );
   }
 }

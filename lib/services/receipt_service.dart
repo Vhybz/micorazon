@@ -2,9 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import '../models/sale_model.dart';
-import '../core/utils.dart';
 import 'package:intl/intl.dart';
+import '../models/sale_model.dart';
+import '../models/user_model.dart';
+import '../models/salary_model.dart';
+import '../core/utils.dart';
 
 class ReceiptService {
   static Future<void> printReceipt(SaleRecord sale) async {
@@ -18,17 +20,14 @@ class ReceiptService {
       
       pw.Font font;
       pw.Font boldFont;
-      pw.Font italicFont;
 
       try {
         font = await PdfGoogleFonts.notoSansRegular();
         boldFont = await PdfGoogleFonts.notoSansBold();
-        italicFont = await PdfGoogleFonts.notoSansItalic();
       } catch (e) {
         debugPrint('Font loading failed, falling back to standard fonts: $e');
         font = pw.Font.helvetica();
         boldFont = pw.Font.helveticaBold();
-        italicFont = pw.Font.helveticaOblique();
       }
 
       for (var sale in sales) {
@@ -58,6 +57,24 @@ class ReceiptService {
                   if (sale.customerName != null)
                     pw.Text('Customer: ${sale.customerName} ${sale.customerPhone != null ? "(${sale.customerPhone})" : ""}', 
                       style: pw.TextStyle(font: font, fontSize: 9)),
+
+                  if (sale.balance > 0.01 && sale.status != SaleStatus.awaitingDeposit)
+                    pw.Container(
+                      width: double.infinity,
+                      margin: const pw.EdgeInsets.symmetric(vertical: 4),
+                      padding: const pw.EdgeInsets.all(4),
+                      decoration: const pw.BoxDecoration(
+                        color: PdfColors.orange50,
+                        border: pw.Border(
+                          top: pw.BorderSide(color: PdfColors.orange, width: 1),
+                          bottom: pw.BorderSide(color: PdfColors.orange, width: 1),
+                        ),
+                      ),
+                      child: pw.Center(
+                        child: pw.Text('*** CREDIT / DEBT SALE ***', 
+                          style: pw.TextStyle(font: boldFont, fontSize: 10, color: PdfColors.orange900)),
+                      ),
+                    ),
                   
                   if (sale.status == SaleStatus.awaitingDeposit)
                     pw.Container(
@@ -111,13 +128,14 @@ class ReceiptService {
                         ],
                       ),
                     ),
-                    
+                    pw.SizedBox(height: 10),
+                  
                   pw.Divider(thickness: 0.5),
                   pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     children: [
-                      pw.Text('Item', style: pw.TextStyle(font: boldFont, fontSize: 10)),
-                      pw.Text('Total', style: pw.TextStyle(font: boldFont, fontSize: 10)),
+                      pw.Text('Item', style: pw.TextStyle(font: boldFont, fontSize: 8)),
+                      pw.Text('Total', style: pw.TextStyle(font: boldFont, fontSize: 8)),
                     ],
                   ),
                   pw.SizedBox(height: 5),
@@ -129,46 +147,21 @@ class ReceiptService {
                           children: [
                             pw.Expanded(
                               child: pw.Text('${item.product.name} (${WeightConverter.formatShort(item.quantity)})', 
-                                style: pw.TextStyle(font: font, fontSize: 9)),
+                                style: pw.TextStyle(font: font, fontSize: 8)),
                             ),
-                            pw.Text(item.total.toStringAsFixed(2), style: pw.TextStyle(font: font, fontSize: 9)),
+                            pw.Text(item.total.toStringAsFixed(2), style: pw.TextStyle(font: font, fontSize: 8)),
                           ],
                         ),
-                        if (item.discount > 0)
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.only(left: 10, bottom: 2),
-                            child: pw.Text(
-                              'Original: ₵${(item.originalPrice * item.quantity).toStringAsFixed(2)} | Saved: ₵${item.discount.toStringAsFixed(2)}',
-                              style: pw.TextStyle(font: italicFont, fontSize: 7, color: PdfColors.grey700),
-                            ),
-                          ),
                       ],
                     )),
                   pw.Divider(thickness: 0.5),
                   
                   pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    mainAxisAlignment: pw.MainAxisAlignment.end,
                     children: [
-                      pw.Column(
-                        crossAxisAlignment: pw.CrossAxisAlignment.start,
-                        children: [
-                          pw.Text('Total Qty: ${WeightConverter.formatShort(sale.totalQty)}', style: pw.TextStyle(font: font, fontSize: 8)),
-                          pw.Text('Product Count: ${sale.productCount}', style: pw.TextStyle(font: font, fontSize: 8)),
-                        ],
-                      ),
                       pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.end,
                         children: [
-                          if (sale.totalDiscount > 0)
-                            pw.Text('PROMO: ${sale.appliedPromo ?? "Applied"}', 
-                              style: pw.TextStyle(font: boldFont, fontSize: 7, color: PdfColors.orange)),
-                          
-                          _receiptRow('Basic Amount', sale.taxExclusiveAmount, font),
-                          _receiptRow('GETFUND 2.5%', sale.getFundAmount, font),
-                          _receiptRow('NHIL 2.5%', sale.nhilAmount, font),
-                          _receiptRow('VAT 15%', sale.vatAmount, font),
-                          pw.Divider(thickness: 0.5),
                           _receiptRow('Sub Total', sale.totalAmount, font),
                           _receiptRow('Net Invoice Value', sale.netInvoiceValue, font, isBold: true),
                         ],
@@ -183,23 +176,16 @@ class ReceiptService {
                   ...sale.payments.map((p) => pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          pw.Text('METHOD: ${_formatMethod(p.method)}', style: pw.TextStyle(font: font, fontSize: 9)),
-                          pw.Text('₵ ${p.amount.toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 9)),
+                          pw.Text('METHOD: ${_formatMethod(p.method)}', style: pw.TextStyle(font: font, fontSize: 8)),
+                          pw.Text('₵ ${p.amount.toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 8)),
                         ],
                       )),
                   
                   pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     children: [
-                      pw.Text('Paid Amount', style: pw.TextStyle(font: boldFont, fontSize: 9)),
-                      pw.Text(sale.amountPaid.toStringAsFixed(2), style: pw.TextStyle(font: boldFont, fontSize: 9)),
-                    ],
-                  ),
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text('Change', style: pw.TextStyle(font: boldFont, fontSize: 9)),
-                      pw.Text(sale.balance < 0 ? sale.balance.abs().toStringAsFixed(2) : '0.00', style: pw.TextStyle(font: boldFont, fontSize: 9)),
+                      pw.Text('Paid Amount', style: pw.TextStyle(font: boldFont, fontSize: 8)),
+                      pw.Text(sale.amountPaid.toStringAsFixed(2), style: pw.TextStyle(font: boldFont, fontSize: 8)),
                     ],
                   ),
                   
@@ -207,50 +193,25 @@ class ReceiptService {
                     pw.Row(
                       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                       children: [
-                        pw.Text('BALANCE DUE (DEBT)', style: pw.TextStyle(font: boldFont, fontSize: 10, color: PdfColors.red)),
-                        pw.Text(sale.balance.toStringAsFixed(2), style: pw.TextStyle(font: boldFont, fontSize: 10, color: PdfColors.red)),
+                        pw.Text('BALANCE DUE (DEBT)', style: pw.TextStyle(font: boldFont, fontSize: 8, color: PdfColors.red)),
+                        pw.Text(sale.balance.toStringAsFixed(2), style: pw.TextStyle(font: boldFont, fontSize: 8, color: PdfColors.red)),
                       ],
                     ),
 
-                  pw.SizedBox(height: 15),
+                  pw.SizedBox(height: 10),
                   pw.Center(
                     child: pw.BarcodeWidget(
                       barcode: pw.Barcode.qrCode(),
-                      data: 'Mi CORAZON RECEIPT\n'
-                            'ID: ${sale.id}\n'
-                            'Date: ${DateFormat('yyyy-MM-dd HH:mm').format(sale.timestamp)}\n'
-                            'Total: GHC ${sale.totalAmount.toStringAsFixed(2)}\n'
-                            'Cashier: ${sale.cashierName}\n'
-                            'Status: ${sale.status == SaleStatus.awaitingDeposit ? "AWAITING DEPOSIT" : (sale.balance <= 0 ? "PAID" : "PARTIAL")}',
-                      width: 60,
-                      height: 60,
+                      data: _generateQRData(sale),
+                      width: 40,
+                      height: 40,
                     ),
                   ),
                   pw.SizedBox(height: 10),
                   pw.Center(
                     child: pw.Column(
                       children: [
-                        pw.Text('Thank you for shopping with us!', style: pw.TextStyle(font: boldFont, fontSize: 9)),
-                        pw.Text('Please come back again.', style: pw.TextStyle(font: font, fontSize: 9)),
-                        pw.SizedBox(height: 10),
-                        pw.Container(
-                          padding: const pw.EdgeInsets.symmetric(horizontal: 5),
-                          child: pw.Column(
-                            children: [
-                              pw.Text(
-                                '"Give thanks to the Lord, for he is good; his love endures forever." - Ps 107:1',
-                                style: pw.TextStyle(font: italicFont, fontSize: 7),
-                                textAlign: pw.TextAlign.center,
-                              ),
-                              pw.SizedBox(height: 2),
-                              pw.Text(
-                                'Barakallahu Feekum | Asaase Yaa, yɛda wo ase',
-                                style: pw.TextStyle(font: italicFont, fontSize: 7),
-                                textAlign: pw.TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
+                        pw.Text('Thank you!', style: pw.TextStyle(font: boldFont, fontSize: 8)),
                       ],
                     ),
                   ),
@@ -270,6 +231,27 @@ class ReceiptService {
     }
   }
 
+  static String _generateQRData(SaleRecord sale) {
+    final buffer = StringBuffer();
+    buffer.writeln('Mi~CORAZON FRESHMEAT');
+    buffer.writeln('Invoice: ${sale.id}');
+    buffer.writeln('Date: ${DateFormat('yyyy-MM-dd HH:mm').format(sale.timestamp)}');
+    buffer.writeln('Cashier: ${sale.cashierName}');
+    if (sale.customerName != null) {
+      buffer.writeln('Customer: ${sale.customerName}');
+    }
+    buffer.writeln('Items:');
+    for (var item in sale.items) {
+      buffer.writeln('- ${item.product.name} (${WeightConverter.formatShort(item.quantity)}): ₵${item.total.toStringAsFixed(2)}');
+    }
+    buffer.writeln('Total: ₵${sale.totalAmount.toStringAsFixed(2)}');
+    buffer.writeln('Paid: ₵${sale.amountPaid.toStringAsFixed(2)}');
+    if (sale.balance > 0.01) {
+      buffer.writeln('Balance: ₵${sale.balance.toStringAsFixed(2)}');
+    }
+    return buffer.toString();
+  }
+
   static String _formatMethod(PaymentMethod method) {
     switch (method) {
       case PaymentMethod.cash: return 'CASH';
@@ -280,12 +262,11 @@ class ReceiptService {
 
   static pw.Widget _receiptRow(String label, double value, pw.Font font, {bool isBold = false}) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+      padding: const pw.EdgeInsets.symmetric(vertical: 0.5),
       child: pw.Row(
-        mainAxisSize: pw.MainAxisSize.min,
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
           pw.Text(label, style: pw.TextStyle(font: font, fontSize: 8, fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal)),
-          pw.SizedBox(width: 15),
           pw.Text(value.toStringAsFixed(2), style: pw.TextStyle(font: font, fontSize: 8, fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal)),
         ],
       ),
@@ -445,30 +426,30 @@ class ReceiptService {
                   // Data Rows with conditional coloring
                   ...sales.map((s) {
                     PdfColor bgColor = PdfColors.white;
-                    PdfColor textColor = PdfColors.black;
+                    PdfColor statusColor = PdfColors.black;
 
                     if (maxDebt > 0) {
-                      if (s.balance >= maxDebt * 0.7) {
+                      if (s.balance >= maxDebt * 0.7 || s.balance >= 500) {
                         bgColor = PdfColors.red50;
-                        textColor = PdfColors.red900;
-                      } else if (s.balance >= maxDebt * 0.3) {
-                        bgColor = PdfColors.yellow50;
-                        textColor = PdfColors.yellow900;
+                        statusColor = PdfColors.red;
+                      } else if (s.balance >= maxDebt * 0.3 || s.balance >= 100) {
+                        bgColor = PdfColors.orange50;
+                        statusColor = PdfColors.orange;
                       } else {
                         bgColor = PdfColors.green50;
-                        textColor = PdfColors.green900;
+                        statusColor = PdfColors.green;
                       }
                     }
 
                     return pw.TableRow(
                       decoration: pw.BoxDecoration(color: bgColor),
                       children: [
-                        _tableCell(s.customerName ?? 'Walk-in', font, color: textColor),
-                        _tableCell(s.customerPhone ?? 'N/A', font, color: textColor),
-                        _tableCell(s.id, font, color: textColor),
-                        _tableCell(DateFormat('MMM dd, yyyy').format(s.timestamp), font, color: textColor),
-                        _tableCell('₵${s.totalAmount.toStringAsFixed(2)}', font, color: textColor),
-                        _tableCell('₵${s.balance.toStringAsFixed(2)}', boldFont, color: textColor),
+                        _tableCell(s.customerName ?? 'Walk-in', font),
+                        _tableCell(s.customerPhone ?? 'N/A', font),
+                        _tableCell(s.id.substring(s.id.length - 8).toUpperCase(), font),
+                        _tableCell(DateFormat('MMM dd, yyyy').format(s.timestamp), font),
+                        _tableCell('₵${s.totalAmount.toStringAsFixed(2)}', font),
+                        _tableCell('₵${s.balance.toStringAsFixed(2)}', boldFont, color: statusColor),
                       ],
                     );
                   }),
@@ -488,17 +469,17 @@ class ReceiptService {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
-                  pw.Container(width: 10, height: 10, color: PdfColors.red50),
+                  pw.Container(width: 8, height: 8, color: PdfColors.red),
                   pw.SizedBox(width: 4),
-                  pw.Text('Critical (>70%)', style: pw.TextStyle(fontSize: 8, font: font)),
+                  pw.Text('High (>₵500)', style: pw.TextStyle(fontSize: 7, font: font)),
                   pw.SizedBox(width: 12),
-                  pw.Container(width: 10, height: 10, color: PdfColors.yellow50),
+                  pw.Container(width: 8, height: 8, color: PdfColors.orange),
                   pw.SizedBox(width: 4),
-                  pw.Text('Warning (30-70%)', style: pw.TextStyle(fontSize: 8, font: font)),
+                  pw.Text('Medium (₵100-500)', style: pw.TextStyle(fontSize: 7, font: font)),
                   pw.SizedBox(width: 12),
-                  pw.Container(width: 10, height: 10, color: PdfColors.green50),
+                  pw.Container(width: 8, height: 8, color: PdfColors.green),
                   pw.SizedBox(width: 4),
-                  pw.Text('Minor (<30%)', style: pw.TextStyle(fontSize: 8, font: font)),
+                  pw.Text('Low (<₵100)', style: pw.TextStyle(fontSize: 7, font: font)),
                 ],
               ),
               pw.SizedBox(height: 40),
@@ -661,5 +642,450 @@ class ReceiptService {
     } catch (e) {
       debugPrint('Paid Invoices Report Printing Error: $e');
     }
+  }
+
+  static Future<void> printSalaryReport(List<UserAccount> users, {Map<String, bool>? advanceStatus}) async {
+    try {
+      final doc = pw.Document();
+      final totalPayroll = users.fold(0.0, (sum, u) => sum + (u.salaryAmount ?? 0.0));
+      
+      pw.Font font;
+      pw.Font boldFont;
+
+      try {
+        font = await PdfGoogleFonts.notoSansRegular();
+        boldFont = await PdfGoogleFonts.notoSansBold();
+      } catch (e) {
+        font = pw.Font.helvetica();
+        boldFont = pw.Font.helveticaBold();
+      }
+
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return [
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Mi~CORAZON FRESHMEAT BUTCHERY', style: pw.TextStyle(font: boldFont)),
+                    pw.Text(DateFormat('yyyy-MM-dd').format(DateTime.now()), style: pw.TextStyle(font: font)),
+                  ],
+                ),
+              ),
+              pw.Text('STAFF PAYROLL & SALARY REPORT', style: pw.TextStyle(fontSize: 18, font: boldFont)),
+              pw.SizedBox(height: 20),
+              
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF6B1111)),
+                    children: [
+                      _tableHeader('Staff Name', boldFont),
+                      _tableHeader('Role', boldFont),
+                      _tableHeader('Due Day', boldFont),
+                      _tableHeader('Type', boldFont),
+                      _tableHeader('Amount (GHS)', boldFont),
+                    ],
+                  ),
+                  ...users.where((u) => u.salaryAmount != null).map((u) {
+                    final isAdvance = u.lastPaymentWasAdvance;
+                    return pw.TableRow(
+                      children: [
+                        _tableCell(u.name, font),
+                        _tableCell(u.role.name.toUpperCase(), font),
+                        _tableCell('Day ${u.salaryDay ?? "--"}', font),
+                        _tableCell(
+                          isAdvance ? 'ADVANCE' : 'FULL', 
+                          boldFont, 
+                          color: isAdvance ? PdfColors.red : PdfColors.black
+                        ),
+                        _tableCell(
+                          u.salaryAmount?.toStringAsFixed(2) ?? '0.00', 
+                          boldFont,
+                          color: isAdvance ? PdfColors.red : PdfColors.black
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+
+              pw.SizedBox(height: 20),
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Row(
+                        children: [
+                          pw.Text('Total Monthly Payroll: ', style: pw.TextStyle(font: boldFont, fontSize: 14)),
+                          pw.Text('₵ ${totalPayroll.toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 14, color: PdfColors.green)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 40),
+              pw.Center(
+                child: pw.Text('Authorized by Administrator', style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey)),
+              ),
+            ];
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => doc.save(),
+        name: 'Salary_Report_${DateFormat('yyyyMMdd').format(DateTime.now())}',
+      );
+    } catch (e) {
+      debugPrint('Salary Report Printing Error: $e');
+    }
+  }
+
+  static Future<void> printDetailedHistoryReport(List<SaleRecord> sales, {required String period}) async {
+    try {
+      final doc = pw.Document();
+      final activeSales = sales.where((s) => s.status != SaleStatus.cancelled).toList();
+      final totalRevenue = activeSales.fold(0.0, (sum, s) => sum + s.totalAmount);
+      final totalCost = activeSales.fold(0.0, (sum, s) => sum + s.totalCost);
+      final netProfit = totalRevenue - totalCost;
+
+      // Product breakdown
+      final Map<String, double> productQtyMap = {};
+      for (var sale in activeSales) {
+        for (var item in sale.items) {
+          productQtyMap[item.product.name] = (productQtyMap[item.product.name] ?? 0) + item.quantity;
+        }
+      }
+      final sortedProducts = productQtyMap.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+
+      pw.Font font;
+      pw.Font boldFont;
+
+      try {
+        font = await PdfGoogleFonts.notoSansRegular();
+        boldFont = await PdfGoogleFonts.notoSansBold();
+      } catch (e) {
+        font = pw.Font.helvetica();
+        boldFont = pw.Font.helveticaBold();
+      }
+
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return [
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Mi~CORAZON FRESHMEAT BUTCHERY', style: pw.TextStyle(font: boldFont)),
+                    pw.Text(DateFormat('yyyy-MM-dd').format(DateTime.now()), style: pw.TextStyle(font: font)),
+                  ],
+                ),
+              ),
+              pw.Text('DETAILED SALES & PROFIT REPORT', style: pw.TextStyle(fontSize: 18, font: boldFont)),
+              pw.Text('Period: $period', style: pw.TextStyle(fontSize: 12, font: font, color: PdfColors.grey700)),
+              pw.SizedBox(height: 20),
+
+              // Financial Summary
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  _statBox('TOTAL SALES', '₵${totalRevenue.toStringAsFixed(2)}', PdfColors.blue900, boldFont, font),
+                  _statBox('TOTAL COST', '₵${totalCost.toStringAsFixed(2)}', PdfColors.red900, boldFont, font),
+                  _statBox('NET PROFIT', '₵${netProfit.toStringAsFixed(2)}', PdfColors.green900, boldFont, font),
+                ],
+              ),
+              pw.SizedBox(height: 30),
+
+              // Product Breakdown
+              pw.Text('PRODUCT SALES BREAKDOWN', style: pw.TextStyle(fontSize: 14, font: boldFont)),
+              pw.SizedBox(height: 10),
+              pw.TableHelper.fromTextArray(
+                headers: ['Product Name', 'Total Quantity Sold'],
+                data: sortedProducts.map((e) => [e.key, '${e.value.toStringAsFixed(2)} kg']).toList(),
+                headerStyle: pw.TextStyle(font: boldFont, color: PdfColors.white, fontSize: 10),
+                cellStyle: pw.TextStyle(font: font, fontSize: 10),
+                headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF6B1111)),
+                cellAlignment: pw.Alignment.centerLeft,
+              ),
+              pw.SizedBox(height: 30),
+
+              // Transaction Log
+              pw.Text('TRANSACTION LOG', style: pw.TextStyle(fontSize: 14, font: boldFont)),
+              pw.SizedBox(height: 10),
+              pw.TableHelper.fromTextArray(
+                headers: ['ID', 'Time', 'Customer', 'Items', 'Total'],
+                data: activeSales.map((s) => [
+                  s.id.substring(s.id.length - 8).toUpperCase(),
+                  DateFormat('MMM dd, HH:mm').format(s.timestamp),
+                  s.customerName ?? 'Walk-in',
+                  s.items.length.toString(),
+                  '₵${s.totalAmount.toStringAsFixed(2)}',
+                ]).toList(),
+                headerStyle: pw.TextStyle(font: boldFont, color: PdfColors.white, fontSize: 10),
+                cellStyle: pw.TextStyle(font: font, fontSize: 9),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.grey700),
+                cellAlignment: pw.Alignment.centerLeft,
+              ),
+            ];
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => doc.save(),
+        name: 'Detailed_Sales_Report_${DateFormat('yyyyMMdd').format(DateTime.now())}',
+      );
+    } catch (e) {
+      debugPrint('Detailed Report Printing Error: $e');
+    }
+  }
+
+  static pw.Widget _statBox(String label, String value, PdfColor color, pw.Font boldFont, pw.Font font) {
+    return pw.Container(
+      width: 170,
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey300),
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(label, style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey700)),
+          pw.SizedBox(height: 5),
+          pw.Text(value, style: pw.TextStyle(font: boldFont, fontSize: 14, color: color)),
+        ],
+      ),
+    );
+  }
+
+  static Future<void> printSalaryHistory(UserAccount user, List<SalaryRecord> history, {required String period}) async {
+    try {
+      final doc = pw.Document();
+      final totalPaid = history.fold(0.0, (sum, r) => sum + r.amount);
+
+      pw.Font font;
+      pw.Font boldFont;
+
+      try {
+        font = await PdfGoogleFonts.notoSansRegular();
+        boldFont = await PdfGoogleFonts.notoSansBold();
+      } catch (e) {
+        font = pw.Font.helvetica();
+        boldFont = pw.Font.helveticaBold();
+      }
+
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return [
+              pw.Header(
+                level: 0,
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Mi~CORAZON FRESHMEAT BUTCHERY', style: pw.TextStyle(font: boldFont)),
+                    pw.Text(DateFormat('yyyy-MM-dd').format(DateTime.now()), style: pw.TextStyle(font: font)),
+                  ],
+                ),
+              ),
+              pw.Text('WORKER PAYMENT STATEMENT', style: pw.TextStyle(fontSize: 18, font: boldFont)),
+              pw.SizedBox(height: 10),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Employee: ${user.name}', style: pw.TextStyle(font: boldFont)),
+                      pw.Text('Role: ${user.role.name.toUpperCase()}', style: pw.TextStyle(font: font, fontSize: 10)),
+                    ],
+                  ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text('Period: $period', style: pw.TextStyle(font: boldFont)),
+                      pw.Text('Base Salary: GHS ${user.salaryAmount?.toStringAsFixed(2) ?? "0.00"}', style: pw.TextStyle(font: font, fontSize: 10)),
+                    ],
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+              pw.SizedBox(height: 20),
+              pw.Table(
+                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF6B1111)),
+                    children: [
+                      _tableHeader('Date', boldFont),
+                      _tableHeader('Type', boldFont),
+                      _tableHeader('Note', boldFont),
+                      _tableHeader('Amount', boldFont),
+                    ],
+                  ),
+                  ...history.map((r) {
+                    final color = r.isAdvance ? PdfColors.red : PdfColors.black;
+                    return pw.TableRow(
+                      children: [
+                        _tableCell(DateFormat('yyyy-MM-dd').format(r.date), font, color: color),
+                        _tableCell(r.isAdvance ? 'ADVANCE' : 'FULL', boldFont, color: color),
+                        _tableCell(r.note ?? '--', font, color: color),
+                        _tableCell(r.amount.toStringAsFixed(2), boldFont, color: color),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+              pw.SizedBox(height: 20),
+              pw.Divider(),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text('Total Paid in Period: ', style: pw.TextStyle(font: boldFont)),
+                      pw.Text('GHS ${totalPaid.toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 16, color: PdfColors.green)),
+                    ],
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 40),
+              pw.Center(
+                child: pw.Text('Verified by Mi~Corazon Management System', style: pw.TextStyle(font: font, fontSize: 8, color: PdfColors.grey)),
+              ),
+            ];
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => doc.save(),
+        name: 'Salary_History_${user.firstName}_${DateFormat('yyyyMMdd').format(DateTime.now())}',
+      );
+    } catch (e) {
+      debugPrint('History Report Printing Error: $e');
+    }
+  }
+
+  static Future<void> printPayslip(UserAccount user, double amount, bool isAdvance) async {
+    try {
+      final doc = pw.Document();
+      
+      pw.Font font;
+      pw.Font boldFont;
+
+      try {
+        font = await PdfGoogleFonts.notoSansRegular();
+        boldFont = await PdfGoogleFonts.notoSansBold();
+      } catch (e) {
+        font = pw.Font.helvetica();
+        boldFont = pw.Font.helveticaBold();
+      }
+
+      doc.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.roll80,
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Center(
+                  child: pw.Column(
+                    children: [
+                      pw.Text('Mi~CORAZON', style: pw.TextStyle(font: boldFont, fontSize: 16)),
+                      pw.Text('STAFF PAYSLIP', style: pw.TextStyle(font: font, fontSize: 10)),
+                      pw.Divider(),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 10),
+                _payslipRow('Staff Name:', user.name, font, boldFont),
+                _payslipRow('Staff ID:', user.id.substring(user.id.length - 8).toUpperCase(), font, boldFont),
+                _payslipRow('Role:', user.role.name.toUpperCase(), font, boldFont),
+                _payslipRow('Date:', DateFormat('yyyy-MM-dd').format(DateTime.now()), font, boldFont),
+                pw.Divider(thickness: 0.5),
+                pw.SizedBox(height: 5),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('PAYMENT TYPE:', style: pw.TextStyle(font: font, fontSize: 9)),
+                    pw.Text(
+                      isAdvance ? 'ADVANCE' : 'FULL SALARY', 
+                      style: pw.TextStyle(font: boldFont, fontSize: 9, color: isAdvance ? PdfColors.red : PdfColors.black)
+                    ),
+                  ],
+                ),
+                pw.SizedBox(height: 8),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('AMOUNT PAID:', style: pw.TextStyle(font: boldFont, fontSize: 12)),
+                    pw.Text(
+                      'GHS ${amount.toStringAsFixed(2)}', 
+                      style: pw.TextStyle(font: boldFont, fontSize: 12, color: isAdvance ? PdfColors.red : PdfColors.green)
+                    ),
+                  ],
+                ),
+                if (!isAdvance && user.salaryAmount != null)
+                   _payslipRow('Base Salary:', 'GHS ${user.salaryAmount!.toStringAsFixed(2)}', font, boldFont, fontSize: 8),
+                
+                pw.SizedBox(height: 20),
+                pw.Divider(thickness: 0.5),
+                pw.SizedBox(height: 10),
+                pw.Center(
+                  child: pw.Column(
+                    children: [
+                      pw.Text('Verified by System', style: pw.TextStyle(font: font, fontSize: 7, fontStyle: pw.FontStyle.italic)),
+                      pw.SizedBox(height: 5),
+                      pw.BarcodeWidget(
+                        barcode: pw.Barcode.qrCode(),
+                        data: 'PAYSLIP:\nEmployee: ${user.name}\nID: ${user.id}\nAmount: GHS ${amount.toStringAsFixed(2)}\nType: ${isAdvance ? "ADVANCE" : "FULL"}\nDate: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
+                        width: 40,
+                        height: 40,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => doc.save(),
+        name: 'Payslip_${user.firstName}_${DateFormat('yyyyMMdd').format(DateTime.now())}',
+      );
+    } catch (e) {
+      debugPrint('Payslip Printing Error: $e');
+    }
+  }
+
+  static pw.Widget _payslipRow(String label, String value, pw.Font font, pw.Font boldFont, {double fontSize = 9}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(label, style: pw.TextStyle(font: font, fontSize: fontSize)),
+          pw.Text(value, style: pw.TextStyle(font: boldFont, fontSize: fontSize)),
+        ],
+      ),
+    );
   }
 }

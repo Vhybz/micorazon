@@ -1,3 +1,4 @@
+import '../core/uuid_utils.dart';
 import '../models/product.dart';
 import 'product_service.dart';
 import 'user_provider.dart';
@@ -23,24 +24,24 @@ class ProductSeeder {
         ]
       },
       {
-        'BEEF': [
-          'Mixed Meat', 'Boneless', 'Offals / Yemadeɛ', 'Beef Steak', 
+        'COW': [ // Changed from BEEF to COW
+          'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Cow Steak',
           'Liver & Lungs', 'Grounded Meat', 'Feet', 'Head', 'Tail / Padua'
         ]
       },
       {
         'GOAT': [
-          'Mixed Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet'
+          'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet'
         ]
       },
       {
         'SHEEP': [
-          'Mixed Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet'
+          'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet'
         ]
       },
       {
         'PORK': [
-          'Mixed Meat', 'Boneless Meat', 'Offals / Yemadeɛ', 'Pork Steak', 
+          'Standard Meat', 'Boneless Meat', 'Offals / Yemadeɛ', 'Pork Steak',
           'Head', 'Ear', 'Feet', 'Liver', 'Skin'
         ]
       },
@@ -67,9 +68,7 @@ class ProductSeeder {
       for (var name in productNames) {
         if (existingNames.contains(name.toLowerCase())) continue;
 
-        final String timestamp = DateTime.now().millisecondsSinceEpoch.toString();
-        final String suffix = (timestamp.length > 12) ? timestamp.substring(timestamp.length - 12) : timestamp.padLeft(12, '0');
-        final String validUuid = '00000000-0000-0000-0000-$suffix';
+        final String validUuid = UuidUtils.generate();
 
         final product = Product(
           id: validUuid,

@@ -19,7 +19,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       description: 'Experience world-class "Farm to Fork" traceability. Know exactly where your meat comes from.',
       icon: Icons.auto_awesome_rounded,
       color: AppColors.primaryMaroon,
-      bgAsset: 'assets/images/meat_art.jpg',
+      bgAsset: 'assets/images/bgi/img11.png',
     ),
     OnboardingData(
       title: 'Barcoded Precision',
@@ -27,7 +27,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       description: 'Every gram is tracked. Scan barcodes for instant verification and perfect inventory accuracy.',
       icon: Icons.qr_code_scanner_rounded,
       color: const Color(0xFF1B5E20), // Deep Forest Green
-      bgAsset: 'assets/images/meat_on_scale.jpg',
+      bgAsset: 'assets/images/bgi/img22.png',
     ),
     OnboardingData(
       title: 'Growth Analytics',
@@ -35,7 +35,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       description: 'Real-time profit tracking and business insights. Manage multiple branches from your smartphone.',
       icon: Icons.insights_rounded,
       color: const Color(0xFF0D47A1), // Deep Navy Blue
-      bgAsset: 'assets/images/beef_art.jpg',
+      bgAsset: 'assets/images/bgi/img11.png',
     ),
     OnboardingData(
       title: 'Ghana-Proof Work',
@@ -43,7 +43,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       description: 'Internet down? No problem. The system works perfectly offline and syncs when connection returns.',
       icon: Icons.cloud_done_rounded,
       color: const Color(0xFFE65100), // Rich Orange
-      bgAsset: 'assets/images/pork_art.jpg',
+      bgAsset: 'assets/images/bgi/img22.png',
     ),
   ];
 
@@ -54,6 +54,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
           // 1. Dynamic Background Image with sophisticated overlay

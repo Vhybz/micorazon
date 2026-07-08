@@ -1,8 +1,9 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/branch_model.dart';
 import '../core/supabase_config.dart';
 
 class SupabaseBranchService {
-  final _client = SupabaseConfig.client;
+  SupabaseClient get _client => SupabaseConfig.client;
 
   Future<List<Branch>> getBranches() async {
     final response = await _client

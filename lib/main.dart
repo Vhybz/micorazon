@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
@@ -15,7 +16,7 @@ import 'screens/admin/debt_management_screen.dart';
 import 'screens/admin/inventory_control_screen.dart';
 import 'screens/admin/expense_management_screen.dart';
 import 'screens/admin/customer_management_screen.dart';
-import 'screens/admin/user_management_screen.dart';
+import 'screens/admin/staff_management_screen.dart';
 import 'screens/admin/system_settings_screen.dart';
 import 'screens/admin/butcher_analytics_screen.dart';
 import 'screens/admin/recents_screen.dart';
@@ -24,6 +25,7 @@ import 'screens/admin/tax_compliance_screen.dart';
 import 'screens/admin/salary_management_screen.dart';
 import 'screens/butcher/documents_screen.dart';
 import 'screens/cashier/cashier_pos.dart';
+import 'screens/cashier/stock_verification_screen.dart';
 import 'screens/butcher/butcher_shell.dart';
 import 'screens/settings_screen.dart';
 import 'screens/profile_screen.dart';
@@ -33,14 +35,13 @@ import 'services/sync_provider.dart';
 import 'core/supabase_config.dart';
 import 'services/push_notification_service.dart';
 import 'services/offline_sync_service.dart';
-
 import 'screens/admin/super_admin_screen.dart';
 
 void main() async {
   try {
     WidgetsFlutterBinding.ensureInitialized();
     
-    // 0. Load Environment Variables First
+    // 1. Load Environment Variables
     try {
       await dotenv.load(fileName: ".env");
     } catch (_) {
@@ -51,12 +52,26 @@ void main() async {
       }
     }
 
-    usePathUrlStrategy();
+    if (kIsWeb) {
+      usePathUrlStrategy();
+    }
 
-    // Initialize Offline Sync Engine (Hive)
+    // 2. Unified Supabase Initialization
+    try {
+      await SupabaseConfig.initialize();
+      if (kDebugMode) {
+        debugPrint('SYSTEM STATUS: Cloud Backend Connected.');
+      }
+    } catch (e) {
+      debugPrint('SUPABASE BOOT FAILURE: $e');
+      // On web, if this fails, we want to show the initialization error screen
+      rethrow;
+    }
+
+    // 3. Initialize Offline Sync Engine (Hive)
     await OfflineSyncService.initialize();
 
-    // Initialize System Tray Notifications (Graceful failure)
+    // 4. Initialize System Tray Notifications (Graceful failure)
     try {
       await PushNotificationService.initialize();
     } catch (e) {
@@ -74,14 +89,6 @@ void main() async {
     );
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     
-    // Unified Supabase Initialization
-    try {
-      await SupabaseConfig.initialize();
-    } catch (e) {
-      debugPrint('SUPABASE BOOT WARNING: App is likely offline. Proceeding in local mode...');
-      // We don't rethrow here. The app will boot using local cached auth if available.
-    }
-
     runApp(
       const ProviderScope(
         child: MeatShopApp(),
@@ -138,7 +145,9 @@ class InitializationErrorScreen extends StatelessWidget {
                     child: Column(
                       children: [
                         Text(
-                          'Technical Error: $errorMessage',
+                          errorMessage!.contains('minified') 
+                            ? 'Technical Error (Minified): $errorMessage\n\nThis usually means Supabase failed to initialize on Web. Check your browser console (F12) for the exact error.'
+                            : 'Technical Error: $errorMessage',
                           style: const TextStyle(color: Colors.yellowAccent, fontSize: 13, fontFamily: 'monospace', fontWeight: FontWeight.bold),
                           textAlign: TextAlign.center,
                         ),
@@ -147,7 +156,7 @@ class InitializationErrorScreen extends StatelessWidget {
                           Text(
                             stackTrace!,
                             style: const TextStyle(color: Colors.white70, fontSize: 10, fontFamily: 'monospace'),
-                            maxLines: 10,
+                            maxLines: 15,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
@@ -253,7 +262,7 @@ void _showManualConfigDialog(BuildContext context) {
               try {
                 await Supabase.initialize(
                   url: urlController.text.trim(),
-                  anonKey: keyController.text.trim(),
+                  publishableKey: keyController.text.trim(),
                 );
                 if (context.mounted) {
                   Navigator.pop(context);
@@ -308,7 +317,7 @@ class MeatShopApp extends ConsumerWidget {
         '/admin/debts': (context) => const DebtManagementScreen(),
         '/admin/stock': (context) => const InventoryControlScreen(),
         '/admin/tax': (context) => const TaxComplianceScreen(),
-        '/admin/users': (context) => const UserManagementScreen(),
+        '/admin/staff': (context) => const StaffManagementScreen(),
         '/admin/salaries': (context) => const SalaryManagementScreen(),
         '/admin/butcher': (context) => const ButcherAnalyticsScreen(),
         '/admin/recents': (context) => const RecentsScreen(),
@@ -318,6 +327,7 @@ class MeatShopApp extends ConsumerWidget {
         '/profile': (context) => const ProfileScreen(),
         '/about': (context) => const AboutScreen(),
         '/cashier': (context) => const CashierPOS(),
+        '/cashier/verify-stock': (context) => const StockVerificationScreen(),
         '/butcher': (context) => const ButcherShell(),
       },
     );

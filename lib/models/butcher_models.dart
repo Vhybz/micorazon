@@ -24,7 +24,7 @@ extension AnimalTypeX on AnimalType {
 
   String get shortCode {
     switch (this) {
-      case AnimalType.cow: return 'BF'; // Beef
+      case AnimalType.cow: return 'CW'; // Changed from BF to CW
       case AnimalType.bull: return 'BL';
       case AnimalType.pig: return 'PK'; // Pork
       case AnimalType.sheep: return 'SH';
@@ -56,10 +56,10 @@ extension AnimalTypeX on AnimalType {
       case AnimalType.cow:
       case AnimalType.bull:
         return [
-          'Mixed Meat',
+          'Standard Meat',
           'Boneless',
           'Offals / Yemadeɛ',
-          'Beef Steak',
+          'Cow Steak',
           'Liver & Lungs',
           'Grounded Meat',
           'Feet',
@@ -68,7 +68,7 @@ extension AnimalTypeX on AnimalType {
         ];
       case AnimalType.pig:
         return [
-          'Mixed Meat',
+          'Standard Meat',
           'Boneless Meat',
           'Offals / Yemadeɛ',
           'Pork Steak',
@@ -81,7 +81,7 @@ extension AnimalTypeX on AnimalType {
       case AnimalType.goat:
       case AnimalType.sheep:
         return [
-          'Mixed Meat',
+          'Standard Meat',
           'Boneless',
           'Offals / Yemadeɛ',
           'Head',
@@ -198,20 +198,21 @@ class SlaughterLog {
     );
   }
 
-  factory SlaughterLog.fromJson(Map<String, dynamic> json) {
+  factory SlaughterLog.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return SlaughterLog(
-      id: json['id'] as String,
-      branchCode: json['branch_code'] as String?,
-      animalId: json['animal_id'] as String,
-      tagNumber: json['tag_number'] as String?,
-      manualFarmTag: json['manual_farm_tag'] as String?,
-      type: AnimalType.values.firstWhere((e) => e.name == json['type']),
-      liveWeight: (json['initial_weight'] as num).toDouble(),
-      meatWeight: (json['carcass_weight'] as num? ?? 0).toDouble(),
-      price: (json['price'] as num? ?? 0).toDouble(),
-      farmPrice: (json['farm_price'] as num?)?.toDouble(),
-      slaughterTime: json['slaughter_time'] != null ? DateTime.parse(json['slaughter_time'] as String) : null,
-      status: SlaughterStatus.values.firstWhere((e) => e.name == json['status']),
+      id: map['id'] as String,
+      branchCode: map['branch_code'] as String?,
+      animalId: map['animal_id'] as String,
+      tagNumber: map['tag_number'] as String?,
+      manualFarmTag: map['manual_farm_tag'] as String?,
+      type: AnimalType.values.firstWhere((e) => e.name == map['type']),
+      liveWeight: (map['initial_weight'] as num).toDouble(),
+      meatWeight: (map['carcass_weight'] as num? ?? 0).toDouble(),
+      price: (map['price'] as num? ?? 0).toDouble(),
+      farmPrice: (map['farm_price'] as num?)?.toDouble(),
+      slaughterTime: map['slaughter_time'] != null ? DateTime.parse(map['slaughter_time'] as String) : null,
+      status: SlaughterStatus.values.firstWhere((e) => e.name == map['status']),
     );
   }
 
@@ -296,23 +297,24 @@ class MeatBatch {
     );
   }
 
-  factory MeatBatch.fromJson(Map<String, dynamic> json) {
+  factory MeatBatch.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return MeatBatch(
-      id: json['id'] as String,
-      branchCode: json['branch_code'] as String?,
-      animalId: json['animal_id'] as String?,
-      meatType: json['meat_type'] as String,
-      weight: (json['initial_weight'] as num).toDouble(),
-      costPrice: (json['cost_price'] as num? ?? 0.0).toDouble(),
-      createdAt: DateTime.parse(json['created_at'] as String),
-      status: json['status'] as String,
+      id: map['id'] as String,
+      branchCode: map['branch_code'] as String?,
+      animalId: map['animal_id'] as String?,
+      meatType: map['meat_type'] as String,
+      weight: (map['initial_weight'] as num).toDouble(),
+      costPrice: (map['cost_price'] as num? ?? 0.0).toDouble(),
+      createdAt: DateTime.parse(map['created_at'] as String),
+      status: map['status'] as String,
       source: BatchSource(
-        name: json['source_name'] ?? '',
-        location: json['source_location'] ?? '',
-        owner: json['owner_name'] ?? '',
+        name: map['source_name'] ?? '',
+        location: map['source_location'] ?? '',
+        owner: map['owner_name'] ?? '',
       ),
-      inspectedBy: json['inspected_by'] as String?,
-      receivedBy: json['received_by'] as String?,
+      inspectedBy: map['inspected_by'] as String?,
+      receivedBy: map['received_by'] as String?,
     );
   }
 
@@ -341,6 +343,7 @@ class MeatCut {
   final String? meatType;
   final String batchId;
   final double weight;
+  final String unit; // Added for 'kg' vs 'Qty' support
   final DateTime processedAt;
 
   MeatCut({
@@ -350,6 +353,7 @@ class MeatCut {
     this.meatType,
     required this.batchId,
     required this.weight,
+    this.unit = 'kg', // Default to kg
     required this.processedAt,
   });
 
@@ -360,6 +364,7 @@ class MeatCut {
     String? meatType,
     String? batchId,
     double? weight,
+    String? unit,
     DateTime? processedAt,
   }) {
     return MeatCut(
@@ -369,19 +374,22 @@ class MeatCut {
       meatType: meatType ?? this.meatType,
       batchId: batchId ?? this.batchId,
       weight: weight ?? this.weight,
+      unit: unit ?? this.unit,
       processedAt: processedAt ?? this.processedAt,
     );
   }
 
-  factory MeatCut.fromJson(Map<String, dynamic> json) {
+  factory MeatCut.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return MeatCut(
-      id: json['id'] as String,
-      branchCode: json['branch_code'] as String?,
-      name: json['name'] as String,
-      meatType: json['meat_type'] as String?,
-      batchId: json['batch_id'] as String,
-      weight: (json['weight'] as num).toDouble(),
-      processedAt: DateTime.parse(json['processed_at'] as String),
+      id: map['id'] as String,
+      branchCode: map['branch_code'] as String?,
+      name: map['name'] as String,
+      meatType: map['meat_type'] as String?,
+      batchId: map['batch_id'] as String,
+      weight: (map['weight'] as num).toDouble(),
+      unit: map['unit']?.toString() ?? 'kg',
+      processedAt: DateTime.parse(map['processed_at'] as String),
     );
   }
 
@@ -392,6 +400,7 @@ class MeatCut {
     'name': name,
     'meat_type': meatType,
     'weight': weight,
+    'unit': unit,
     'processed_at': processedAt.toIso8601String(),
   };
 }
@@ -445,17 +454,18 @@ class ButcherOrder {
     );
   }
 
-  factory ButcherOrder.fromJson(Map<String, dynamic> json) {
+  factory ButcherOrder.fromJson(dynamic json) {
+    final map = Map<String, dynamic>.from(json);
     return ButcherOrder(
-      id: json['id'] as String,
-      branchCode: json['branch_code'] as String?,
-      customerId: json['customer_id'] as String?,
-      customerName: json['customer_name'] as String,
-      customerPhone: json['customer_phone'] as String?,
-      items: List<String>.from(json['items'] ?? []),
-      totalWeight: (json['total_weight'] as num).toDouble(),
-      dueDate: DateTime.parse(json['due_date'] as String),
-      status: ButcherOrderStatus.values.firstWhere((e) => e.name == json['status']),
+      id: map['id'] as String,
+      branchCode: map['branch_code'] as String?,
+      customerId: map['customer_id'] as String?,
+      customerName: map['customer_name'] as String,
+      customerPhone: map['customer_phone'] as String?,
+      items: List<String>.from(map['items'] ?? []),
+      totalWeight: (map['total_weight'] as num).toDouble(),
+      dueDate: DateTime.parse(map['due_date'] as String),
+      status: ButcherOrderStatus.values.firstWhere((e) => e.name == map['status']),
     );
   }
 

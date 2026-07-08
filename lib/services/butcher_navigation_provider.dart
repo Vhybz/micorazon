@@ -6,7 +6,6 @@ enum ButcherScreen {
   animalIntake,
   slaughterLog,
   meatProcessing,
-  batchManagement,
   stockTransfer,
   inventory,
   orders,
@@ -17,7 +16,8 @@ enum ButcherScreen {
   settings,
   profile,
   howToUse,
-  carcassBreakdown
+  carcassBreakdown,
+  batchManagement
 }
 
 class ButcherNavigationNotifier extends StateNotifier<ButcherScreen> {

@@ -365,23 +365,33 @@ class _BatchManagementScreenState extends ConsumerState<BatchManagementScreen> {
           ),
         ),
         actions: [
-          TextButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.stockTransfer);
-            },
-            icon: const Icon(Icons.local_shipping_outlined, color: Colors.blue),
-            label: const Text('Move to Transfer', style: TextStyle(color: Colors.blue)),
-          ),
+          if (batch.status == 'completed')
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.stockTransfer);
+              },
+              icon: const Icon(Icons.local_shipping_outlined, color: Colors.white),
+              label: const Text('PREPARE STOCK TRANSFER', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
+            )
+          else
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.stockTransfer);
+              },
+              icon: const Icon(Icons.local_shipping_outlined, color: Colors.blue),
+              label: const Text('Move to Transfer', style: TextStyle(color: Colors.blue)),
+            ),
           TextButton.icon(
             onPressed: () => LabelService.printBatchLabel(batch),
             icon: const Icon(Icons.print),
-            label: const Text('Master Batch Label'),
+            label: const Text('Master Label'),
           ),
-          ElevatedButton(
+          TextButton(
             onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryMaroon, foregroundColor: Colors.white),
-            child: const Text('Close Passport'),
+            child: const Text('Close'),
           ),
         ],
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 import '../services/auth_provider.dart';
 import '../services/user_provider.dart';
 import '../models/user_model.dart';
@@ -49,48 +50,69 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
   Future<void> _checkAuthAndNavigate() async {
     _controller.forward();
     
+    // Fail-safe: Force navigation after 8 seconds no matter what
+    final forceTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted) {
+        debugPrint('Splash: FAIL-SAFE TRIGGERED. Forcing navigation to onboarding.');
+        Navigator.pushReplacementNamed(context, '/onboarding');
+      }
+    });
+
+    // Minimum 4 seconds of splash animation
     await Future.delayed(const Duration(seconds: 4));
     
-    if (!mounted) return;
-
-    final currentUser = ref.read(authServiceProvider).currentUser;
-    
-    if (currentUser != null) {
-      ref.read(currentUserIdProvider.notifier).state = currentUser.id;
-      
-      try {
-        final users = await ref.read(userProvider.notifier).service.getUsers();
-        UserAccount? userAccount;
-        try {
-          userAccount = users.firstWhere((u) => u.id == currentUser.id);
-        } catch (_) {
-          userAccount = null;
-        }
-
-        if (userAccount != null && userAccount.status == AccountStatus.approved) {
-          if (mounted) {
-            switch (userAccount.activePrimaryRole) {
-              case UserRole.admin:
-                Navigator.pushReplacementNamed(context, '/admin');
-                break;
-              case UserRole.butcher:
-                Navigator.pushReplacementNamed(context, '/butcher');
-                break;
-              case UserRole.cashier:
-                Navigator.pushReplacementNamed(context, '/cashier');
-                break;
-              case UserRole.superAdmin:
-                Navigator.pushReplacementNamed(context, '/admin/super');
-                break;
-            }
-          }
-          return;
-        }
-      } catch (e) {
-        debugPrint('Splash Auth Error: $e');
-      }
+    if (!mounted) {
+      forceTimer.cancel();
+      return;
     }
 
+    try {
+      final currentUser = ref.read(authServiceProvider).currentUser;
+      
+      if (currentUser != null) {
+        ref.read(currentUserIdProvider.notifier).state = currentUser.id;
+        
+        try {
+          // Add a timeout to prevent hanging on Splash if network is slow/blocked
+          final users = await ref.read(userProvider.notifier).service.getUsers()
+              .timeout(const Duration(seconds: 3));
+              
+          UserAccount? userAccount;
+          try {
+            userAccount = users.firstWhere((u) => u.id == currentUser.id);
+          } catch (_) {
+            userAccount = null;
+          }
+
+          if (userAccount != null && userAccount.status == AccountStatus.approved) {
+            forceTimer.cancel();
+            if (mounted) {
+              switch (userAccount.activePrimaryRole) {
+                case UserRole.admin:
+                  Navigator.pushReplacementNamed(context, '/admin');
+                  break;
+                case UserRole.butcher:
+                  Navigator.pushReplacementNamed(context, '/butcher');
+                  break;
+                case UserRole.cashier:
+                  Navigator.pushReplacementNamed(context, '/cashier');
+                  break;
+                case UserRole.superAdmin:
+                  Navigator.pushReplacementNamed(context, '/admin/super');
+                  break;
+              }
+            }
+            return;
+          }
+        } catch (e) {
+          debugPrint('Splash Auth Error (Likely Timeout): $e');
+        }
+      }
+    } catch (e) {
+      debugPrint('Splash: Unexpected auth access error: $e');
+    }
+
+    forceTimer.cancel();
     if (mounted) {
       Navigator.pushReplacementNamed(context, '/onboarding');
     }
@@ -107,6 +129,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
     final theme = Theme.of(context);
     return Scaffold(
       backgroundColor: theme.colorScheme.primary,
+      resizeToAvoidBottomInset: false,
       body: Container(
         width: double.infinity,
         height: double.infinity,
