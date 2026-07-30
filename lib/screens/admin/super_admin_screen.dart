@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
 import '../../widgets/main_app_bar.dart';
 import '../../services/user_provider.dart';
 import '../../services/product_service.dart';
+import '../../services/system_provider.dart';
 import '../../models/user_model.dart';
 import '../../models/product.dart';
+import '../../models/system_models.dart';
 import '../../widgets/responsive_layout.dart';
+import '../../widgets/passcode_guard.dart';
+import '../../services/offline_sync_service.dart';
+import '../../services/sale_provider.dart';
+import '../../services/auth_provider.dart';
 
 class SuperAdminScreen extends ConsumerWidget {
   const SuperAdminScreen({super.key});
@@ -16,62 +23,67 @@ class SuperAdminScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final users = ref.watch(userProvider);
     final productsAsync = ref.watch(productsFutureProvider);
-    final isMobile = ResponsiveLayout.isMobile(context);
+    final auditLogs = ref.watch(auditLogProvider);
+    final isLockdown = ref.watch(systemLockdownProvider);
     
     final pendingUsers = users.where((u) => u.status == AccountStatus.pending).toList();
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0B), // Cyber/Dark theme for Super Admin
-      appBar: MainAppBar(
-        title: 'ROOT ACCESS: SUPER ADMIN', 
-        showMenuButton: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.red),
-            onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.l),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildStatusHeader(context),
-            const SizedBox(height: AppSpacing.xl),
-            
-            if (pendingUsers.isNotEmpty) ...[
-              _buildApprovalSection(context, ref, pendingUsers),
-              const SizedBox(height: AppSpacing.xl),
-            ],
-
-            _buildSectionTitle('Data Recovery Hub', Icons.restore_from_trash, Colors.green),
-            const SizedBox(height: AppSpacing.m),
-            Flex(
-              direction: isMobile ? Axis.vertical : Axis.horizontal,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: isMobile ? 0 : 1,
-                  child: productsAsync.when(
-                    data: (products) => _buildDeletedProductsList(context, ref, products.where((p) => p.isDeleted).toList()),
-                    loading: () => const Center(child: CircularProgressIndicator()),
-                    error: (e, _) => Text('Error loading stock: $e', style: const TextStyle(color: Colors.red)),
-                  ),
-                ),
-              ],
+    return PasscodeGuard(
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A0A0B), // Cyber/Dark theme for Super Admin
+        appBar: MainAppBar(
+          title: 'ROOT ACCESS: SUPER ADMIN', 
+          showMenuButton: false,
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout, color: Colors.red),
+              onPressed: () async {
+                await GlobalLogout.perform(ref);
+                if (context.mounted) {
+                  Navigator.pushReplacementNamed(context, '/login');
+                }
+              },
+              tooltip: 'Log Out System',
             ),
-
-            const SizedBox(height: AppSpacing.xl),
-            _buildSectionTitle('System Control Panel', Icons.settings_input_component, Colors.blue),
-            const SizedBox(height: AppSpacing.m),
-            _buildControlPanel(),
-            
-            const SizedBox(height: AppSpacing.xl),
-            _buildSectionTitle('Live Activity Stream', Icons.analytics_outlined, Colors.purple),
-            const SizedBox(height: AppSpacing.m),
-            _buildGlobalLogs(),
+            IconButton(
+              icon: const Icon(Icons.refresh_rounded),
+              onPressed: () => ref.read(auditLogProvider.notifier).refreshLogs(),
+              tooltip: 'Sync Global State',
+            ),
           ],
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.l),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildStatusHeader(context, isLockdown),
+              const SizedBox(height: AppSpacing.xl),
+              
+              if (pendingUsers.isNotEmpty) ...[
+                _buildApprovalSection(context, ref, pendingUsers),
+                const SizedBox(height: AppSpacing.xl),
+              ],
+
+              _buildSectionTitle('Data Recovery Hub', Icons.restore_from_trash, Colors.green),
+              const SizedBox(height: AppSpacing.m),
+              productsAsync.when(
+                data: (products) => _buildDeletedProductsList(context, ref, products.where((p) => p.isDeleted).toList()),
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Text('Error loading stock: $e', style: const TextStyle(color: Colors.red)),
+              ),
+
+              const SizedBox(height: AppSpacing.xl),
+              _buildSectionTitle('System Control Panel', Icons.settings_input_component, Colors.blue),
+              const SizedBox(height: AppSpacing.m),
+              _buildControlPanel(context, ref, isLockdown),
+              
+              const SizedBox(height: AppSpacing.xl),
+              _buildSectionTitle('Live Activity Stream', Icons.analytics_outlined, Colors.purple),
+              const SizedBox(height: AppSpacing.m),
+              _buildGlobalLogs(auditLogs),
+            ],
+          ),
         ),
       ),
     );
@@ -101,19 +113,21 @@ class SuperAdminScreen extends ConsumerWidget {
           const Text('Awaiting Account Approvals', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           ...pending.map((user) => ListTile(
+            contentPadding: EdgeInsets.zero,
             leading: CircleAvatar(child: Text(user.firstName[0])),
-            title: Text(user.name, style: const TextStyle(color: Colors.white)),
-            subtitle: Text(user.email, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+            title: Text(user.name, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            subtitle: Text(user.email, style: const TextStyle(color: Colors.white54, fontSize: 10), overflow: TextOverflow.ellipsis),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ElevatedButton(
+                IconButton(
+                  icon: const Icon(Icons.check_circle, color: Colors.green),
                   onPressed: () => ref.read(userProvider.notifier).approveUser(user.id),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  child: const Text('Approve'),
                 ),
-                const SizedBox(width: 8),
-                IconButton(icon: const Icon(Icons.close, color: Colors.red), onPressed: () => ref.read(userProvider.notifier).deleteUser(user.id)),
+                IconButton(
+                  icon: const Icon(Icons.cancel, color: Colors.red), 
+                  onPressed: () => ref.read(userProvider.notifier).deleteUser(user.id),
+                ),
               ],
             ),
           )),
@@ -124,6 +138,7 @@ class SuperAdminScreen extends ConsumerWidget {
 
   Widget _buildDeletedProductsList(BuildContext context, WidgetRef ref, List<Product> deleted) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.m),
       decoration: BoxDecoration(color: const Color(0xFF1A1A1E), borderRadius: BorderRadius.circular(AppRadius.m), border: Border.all(color: Colors.white10)),
       child: Column(
@@ -136,12 +151,14 @@ class SuperAdminScreen extends ConsumerWidget {
           else
             ListView.builder(
               shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
               itemCount: deleted.length,
               itemBuilder: (context, index) {
                 final product = deleted[index];
                 return ListTile(
                   dense: true,
-                  title: Text(product.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(product.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                   subtitle: Text(product.category, style: const TextStyle(color: Colors.white38, fontSize: 10)),
                   trailing: IconButton(
                     icon: const Icon(Icons.settings_backup_restore, color: Colors.blue, size: 20),
@@ -156,66 +173,108 @@ class SuperAdminScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildStatusHeader(BuildContext context) {
+  Widget _buildStatusHeader(BuildContext context, bool isLockdown) {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.l),
       decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha: 0.1),
-        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+        color: (isLockdown ? Colors.orange : Colors.red).withValues(alpha: 0.1),
+        border: Border.all(color: (isLockdown ? Colors.orange : Colors.red).withValues(alpha: 0.3)),
         borderRadius: BorderRadius.circular(AppRadius.m),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.security, color: Colors.red, size: 32),
-          SizedBox(width: AppSpacing.m),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Elevated Privileges Active', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 18)),
-              Text('System-wide data recovery and root configuration enabled.', style: TextStyle(color: Colors.white70, fontSize: 12)),
-            ],
+          Icon(isLockdown ? Icons.gpp_maybe : Icons.security, color: isLockdown ? Colors.orange : Colors.red, size: 32),
+          const SizedBox(width: AppSpacing.m),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  isLockdown ? 'Emergency Lockdown Active' : 'Elevated Privileges Active', 
+                  style: TextStyle(color: isLockdown ? Colors.orange : Colors.red, fontWeight: FontWeight.bold, fontSize: 16)
+                ),
+                Text(
+                  isLockdown 
+                    ? 'All system access is currently restricted to Root.' 
+                    : 'System-wide data recovery and root configuration enabled.', 
+                  style: const TextStyle(color: Colors.white70, fontSize: 11)
+                ),
+              ],
+            ),
           ),
-          Spacer(),
-          Text('ID: SU-ROOT-001', style: TextStyle(color: Colors.white38, fontSize: 10, fontFamily: 'monospace')),
+          if (!ResponsiveLayout.isMobile(context))
+            const Text('ID: SU-ROOT-001', style: TextStyle(color: Colors.white38, fontSize: 10, fontFamily: 'monospace')),
         ],
       ),
     );
   }
 
-  Widget _buildControlPanel() {
-    return Wrap(
-      spacing: AppSpacing.m,
-      runSpacing: AppSpacing.m,
-      children: [
-        _controlBtn('Purge Cache', Icons.cleaning_services, Colors.orange),
-        _controlBtn('Database Backup', Icons.backup, Colors.blue),
-        _controlBtn('Reset Passwords', Icons.lock_reset, Colors.purple),
-        _controlBtn('System Lockdown', Icons.gpp_maybe, Colors.red),
-      ],
+  Widget _buildControlPanel(BuildContext context, WidgetRef ref, bool isLockdown) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double width = constraints.maxWidth < 600 ? constraints.maxWidth : (constraints.maxWidth - AppSpacing.m) / 2;
+        return Wrap(
+          spacing: AppSpacing.m,
+          runSpacing: AppSpacing.m,
+          children: [
+            _controlBtn(
+              context,
+              'Purge Cache', 
+              Icons.cleaning_services, 
+              Colors.orange, 
+              width,
+              onTap: () => _confirmPurge(context),
+            ),
+            _controlBtn(
+              context,
+              'Database Backup', 
+              Icons.backup, 
+              Colors.blue, 
+              width,
+              onTap: () => _handleBackup(context, ref),
+            ),
+            _controlBtn(
+              context,
+              'Staff Directory', 
+              Icons.people_outline, 
+              Colors.purple, 
+              width,
+              onTap: () => Navigator.pushReplacementNamed(context, '/admin/staff'),
+            ),
+            _controlBtn(
+              context,
+              isLockdown ? 'End Lockdown' : 'System Lockdown', 
+              isLockdown ? Icons.gpp_good : Icons.gpp_maybe, 
+              isLockdown ? Colors.green : Colors.red, 
+              width,
+              onTap: () => _toggleLockdown(context, ref, isLockdown),
+            ),
+          ],
+        );
+      }
     );
   }
 
-  Widget _controlBtn(String label, IconData icon, Color color) {
+  Widget _controlBtn(BuildContext context, String label, IconData icon, Color color, double width, {required VoidCallback onTap}) {
     return SizedBox(
-      width: 200,
+      width: width,
       child: ElevatedButton.icon(
-        onPressed: () {},
+        onPressed: onTap,
         icon: Icon(icon, size: 16),
-        label: Text(label, style: const TextStyle(fontSize: 12)),
+        label: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF1A1A1E),
           foregroundColor: color,
+          elevation: 0,
           side: BorderSide(color: color.withValues(alpha: 0.3)),
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
         ),
       ),
     );
   }
 
-  Widget _buildGlobalLogs() {
-    final now = DateTime.now();
-    final format = DateFormat('HH:mm:ss');
-    
+  Widget _buildGlobalLogs(List<AuditLog> logs) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(AppSpacing.l),
@@ -224,28 +283,126 @@ class SuperAdminScreen extends ConsumerWidget {
         borderRadius: BorderRadius.circular(AppRadius.m),
         border: Border.all(color: Colors.white10),
       ),
-      child: Column(
-        children: [
-          _logEntry('Admin', 'Deleted User Maria Santos', format.format(now.subtract(const Duration(minutes: 1)))),
-          _logEntry('Admin', 'Deleted Stock Item "Goat Meat"', format.format(now.subtract(const Duration(minutes: 5)))),
-          _logEntry('System', 'Automatic Backup success', format.format(now.subtract(const Duration(hours: 1)))),
+      child: logs.isEmpty 
+        ? const Padding(padding: EdgeInsets.all(20), child: Center(child: Text('No recent global activity.', style: TextStyle(color: Colors.white24, fontSize: 12))))
+        : ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: logs.take(10).length,
+            separatorBuilder: (context, index) => const Divider(color: Colors.white10, height: 24),
+            itemBuilder: (context, index) {
+              final log = logs[index];
+              return _logEntry(
+                log.userName ?? 'System', 
+                log.action.replaceAll('_', ' '), 
+                DateFormat('HH:mm:ss').format(log.timestamp)
+              );
+            },
+          ),
+    );
+  }
+
+  Widget _logEntry(String user, String action, String time) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('[$time]', style: const TextStyle(color: Colors.white30, fontSize: 10, fontFamily: 'monospace')),
+        const SizedBox(width: 8),
+        Text(user, style: const TextStyle(color: AppColors.primaryMaroon, fontWeight: FontWeight.bold, fontSize: 11)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(action, style: const TextStyle(color: Colors.white70, fontSize: 11))),
+      ],
+    );
+  }
+
+  void _confirmPurge(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1E),
+        title: const Text('Purge System Cache?', style: TextStyle(color: Colors.orange)),
+        content: const Text(
+          'This will clear all local data on this device and force a fresh sync from the cloud. Continue?',
+          style: TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await OfflineSyncService.clearAllCache();
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Cache cleared. Restarting data engines...'), backgroundColor: Colors.orange),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+            child: const Text('PURGE'),
+          ),
         ],
       ),
     );
   }
 
-  Widget _logEntry(String user, String action, String time) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Row(
-        children: [
-          Text('[$time]', style: const TextStyle(color: Colors.white30, fontSize: 10, fontFamily: 'monospace')),
-          const SizedBox(width: 8),
-          Text(user, style: const TextStyle(color: AppColors.primaryMaroon, fontWeight: FontWeight.bold, fontSize: 11)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(action, style: const TextStyle(color: Colors.white70, fontSize: 11))),
+  void _toggleLockdown(BuildContext context, WidgetRef ref, bool currentStatus) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1E),
+        title: Text(currentStatus ? 'End System Lockdown?' : 'ACTIVATE LOCKDOWN?', 
+          style: TextStyle(color: currentStatus ? Colors.green : Colors.red)),
+        content: Text(
+          currentStatus 
+            ? 'This will restore standard access for all staff members.'
+            : 'DANGER: This will force every device in the company to the security lock screen immediately. Only Root can undo this.',
+          style: const TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () {
+              ref.read(systemLockdownProvider.notifier).state = !currentStatus;
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(currentStatus ? 'Lockdown Terminated.' : 'SYSTEM-WIDE LOCKDOWN ACTIVE.'),
+                  backgroundColor: currentStatus ? Colors.green : Colors.red,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: currentStatus ? Colors.green : Colors.red, 
+              foregroundColor: Colors.white
+            ),
+            child: Text(currentStatus ? 'RESTORE ACCESS' : 'EXECUTE LOCKDOWN'),
+          ),
         ],
       ),
+    );
+  }
+
+  void _handleBackup(BuildContext context, WidgetRef ref) {
+    final sales = ref.read(saleHistoryProvider);
+    final users = ref.read(userProvider);
+
+    final StringBuffer csv = StringBuffer();
+    csv.writeln('Mi-Corazon System Backup - ${DateTime.now()}');
+    csv.writeln('\n--- SALES HISTORY ---');
+    csv.writeln('ID,Date,Total,Status,SoldBy');
+    for (var s in sales) {
+      csv.writeln('${s.id},${s.timestamp},${s.totalAmount},${s.status.name},${s.cashierName}');
+    }
+
+    csv.writeln('\n--- STAFF DIRECTORY ---');
+    csv.writeln('Name,Role,Branch,Status');
+    for (var u in users) {
+      csv.writeln('${u.name},${u.role.name},${u.branchCode},${u.status.name}');
+    }
+
+    Clipboard.setData(ClipboardData(text: csv.toString()));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Full system state copied to clipboard as CSV.')),
     );
   }
 }

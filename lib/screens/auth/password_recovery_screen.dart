@@ -56,7 +56,8 @@ class _PasswordRecoveryScreenState extends ConsumerState<PasswordRecoveryScreen>
   Future<void> _handleStep1() async {
     setState(() => _isLoading = true);
     try {
-      final data = await Supabase.instance.client
+      // Use adminClient to bypass RLS and ensure explicit headers on Web
+      final data = await SupabaseConfig.adminClient
           .from('users')
           .select('id, phone')
           .or('email.eq.${_controller.text.trim()},phone.eq.${_controller.text.trim()}')
@@ -78,14 +79,18 @@ class _PasswordRecoveryScreenState extends ConsumerState<PasswordRecoveryScreen>
       _generatedCode = List.generate(6, (_) => Random().nextInt(10).toString()).join();
       
       // Use Arkesel via SmsService
-      await SmsService.sendVerificationCodeSms(_userPhone!, _generatedCode!);
+      final success = await SmsService.sendVerificationCodeSms(_userPhone!, _generatedCode!);
 
-      _startTimer();
-      _showMessage('Verification code sent to $_userPhone');
-      setState(() {
-        _step = 1;
-        _controller.clear();
-      });
+      if (success) {
+        _startTimer();
+        _showMessage('Verification code sent to $_userPhone');
+        setState(() {
+          _step = 1;
+          _controller.clear();
+        });
+      } else {
+        _showMessage('Failed to send verification code. Please check your connection or try again later.');
+      }
     } catch (e) {
       _showMessage('Error: $e');
     } finally {
@@ -94,11 +99,14 @@ class _PasswordRecoveryScreenState extends ConsumerState<PasswordRecoveryScreen>
   }
 
   Future<void> _handleStep2() async {
-    setState(() {
-      _generatedCode = _controller.text.trim();
-      _step = 2;
-      _controller.clear();
-    });
+    if (_controller.text.trim() == _generatedCode) {
+      setState(() {
+        _step = 2;
+        _controller.clear();
+      });
+    } else {
+      _showMessage('Invalid verification code. Please try again.');
+    }
   }
 
   // Step 3: Verify and Update
@@ -106,7 +114,10 @@ class _PasswordRecoveryScreenState extends ConsumerState<PasswordRecoveryScreen>
     setState(() => _isLoading = true);
     try {
       // Use SupabaseConfig.adminClient to perform admin operations
-      await SupabaseConfig.adminClient.auth.admin.updateUserById(
+      // This requires the SUPABASE_SERVICE_ROLE_KEY to be correctly set in environment variables
+      final admin = SupabaseConfig.adminClient.auth.admin;
+      
+      await admin.updateUserById(
         _userId!,
         attributes: AdminUserAttributes(password: password),
       );

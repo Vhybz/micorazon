@@ -37,54 +37,57 @@ class NotificationNotifier extends StateNotifier<List<SystemNotification>> {
       final bool isSuperAdmin = user.activePrimaryRole == UserRole.superAdmin;
       final String? userBranch = user.branchCode?.trim();
       
-      _subscription = _service.watchNotifications(userBranch, user.id, isSuperAdmin: isSuperAdmin).listen((notifications) {
-        debugPrint('Notification Engine: Stream update. Total alerts: ${notifications.length}');
+      _subscription = _service.watchNotifications(userBranch, user.id, isSuperAdmin: isSuperAdmin).listen(
+        (notifications) {
+          debugPrint('Notification Engine: Stream update. Total alerts: ${notifications.length}');
 
-        // Determine which notifications are "new" to this device session
-        final List<SystemNotification> newItems = state.isEmpty 
-            ? notifications.take(3).toList() // On first load, check the last few
-            : notifications.where((n) => !state.any((old) => old.id == n.id)).toList();
+          // Determine which notifications are "new" to this device session
+          final List<SystemNotification> newItems = state.isEmpty 
+              ? notifications.take(3).toList() // On first load, check the last few
+              : notifications.where((n) => !state.any((old) => old.id == n.id)).toList();
 
-        for (final n in newItems) {
-           final title = n.title.toUpperCase();
-           final msg = n.message.toUpperCase();
-           
-           // Determine if we should trigger a background sync for stock
-           final bool isStockAlert = title.contains('TRANSFER') || 
-                                     title.contains('DISPATCH') || 
-                                     title.contains('STOCK') ||
-                                     title.contains('VERIFICATION') ||
-                                     title.contains('INCOMING') ||
-                                     msg.contains('DISPATCHED') ||
-                                     msg.contains('ON THE WAY') ||
-                                     msg.contains('TRANSFER');
+          for (final n in newItems) {
+            final title = n.title.toUpperCase();
+            final msg = n.message.toUpperCase();
+            
+            // Determine if we should trigger a background sync for stock
+            final bool isStockAlert = title.contains('TRANSFER') || 
+                                      title.contains('DISPATCH') || 
+                                      title.contains('STOCK') ||
+                                      title.contains('VERIFICATION') ||
+                                      title.contains('INCOMING') ||
+                                      msg.contains('DISPATCHED') ||
+                                      msg.contains('ON THE WAY') ||
+                                      msg.contains('TRANSFER');
 
-           if (isStockAlert) {
-             debugPrint('Notification Engine: Stock event detected. Refreshing...');
-             // Refresh transfers and products
-             // Using Future.microtask to avoid issues during build/layout if triggered from there
-             Future.delayed(const Duration(milliseconds: 500), () {
-               try {
-                 ref.read(transferProvider.notifier).loadTransfers();
-                 // Using the actual provider name from product_service.dart
-                 ref.read(productsFutureProvider.notifier).loadProducts();
-               } catch (e) {
-                 debugPrint('Notification Sync Error: $e');
-               }
-             });
-           }
-           
-           // Show push notification popup if recent AND unread
-           if (!n.isRead && DateTime.now().difference(n.createdAt).inMinutes < 10) {
-             PushNotificationService.showNotification(
-                id: n.createdAt.millisecondsSinceEpoch ~/ 1000,
-                title: n.title,
-                body: n.message,
-             );
-           }
-        }
-        state = notifications;
-      });
+            if (isStockAlert) {
+              debugPrint('Notification Engine: Stock event detected. Refreshing...');
+              Future.delayed(const Duration(milliseconds: 500), () {
+                try {
+                  ref.read(transferProvider.notifier).loadTransfers();
+                  ref.read(productsFutureProvider.notifier).loadProducts();
+                } catch (e) {
+                  debugPrint('Notification Sync Error: $e');
+                }
+              });
+            }
+            
+            // Show push notification popup if recent AND unread
+            if (!n.isRead && DateTime.now().difference(n.createdAt).inMinutes < 10) {
+              PushNotificationService.showNotification(
+                  id: n.createdAt.millisecondsSinceEpoch ~/ 1000,
+                  title: n.title,
+                  body: n.message,
+              );
+            }
+          }
+          state = notifications;
+        },
+        onError: (e) {
+          debugPrint('Notification Stream Connection Error (Resuming?): $e');
+        },
+        cancelOnError: false,
+      );
     }
   }
 

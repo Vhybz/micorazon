@@ -15,6 +15,7 @@ import '../../widgets/responsive_layout.dart';
 import '../../models/user_model.dart';
 import '../../models/document_model.dart';
 import '../../services/document_provider.dart';
+import '../../widgets/role_pop_scope.dart';
 
 class DocumentsScreen extends ConsumerWidget {
   final bool isNested;
@@ -36,77 +37,80 @@ class DocumentsScreen extends ConsumerWidget {
 
     final documents = ref.watch(documentProvider);
 
-    Widget content = SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.l),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Compliance Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
-                    Text('View and manage regulatory certifications', style: TextStyle(color: AppColors.textLight, fontSize: 12)),
-                  ],
+    Widget content = RolePopScope(
+      currentRoute: currentRoute,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppSpacing.l),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Compliance Documents', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: theme.colorScheme.onSurface)),
+                      Text('View and manage regulatory certifications', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.m),
-              ElevatedButton.icon(
-                onPressed: () => _showUploadDialog(context, ref),
-                icon: const Icon(Icons.upload_file),
-                label: const Text('Upload Document'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: theme.colorScheme.primary,
-                  foregroundColor: Colors.white,
+                const SizedBox(width: AppSpacing.m),
+                ElevatedButton.icon(
+                  onPressed: () => _showUploadDialog(context, ref),
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('Upload Document'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: Colors.white,
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          if (documents.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(40.0),
-                child: Column(
-                  children: [
-                    Icon(Icons.folder_open, size: 64, color: theme.dividerColor),
-                    const SizedBox(height: 16),
-                    Text(
-                      user.branchCode == null 
-                        ? 'Branch code missing. Please update your profile.' 
-                        : 'No documents uploaded yet for branch ${user.branchCode}.', 
-                      style: const TextStyle(color: AppColors.textLight),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            )
-          else
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: documents.length,
-              itemBuilder: (context, index) {
-                final doc = documents[index];
-                return _buildDocCard(context, ref, doc);
-              }
+              ],
             ),
-          const SizedBox(height: AppSpacing.xl),
-          const Text('Generated Reports', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: AppSpacing.m),
-          _buildDocItem(
-            context,
-            'GRA Tax Compliance Report', 
-            'Monthly Profit & Tax Breakdown', 
-            'System Generated', 
-            AppColors.primaryMaroon,
-            onTap: () {},
-          ),
-        ],
+            const SizedBox(height: AppSpacing.xl),
+            if (documents.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(40.0),
+                  child: Column(
+                    children: [
+                      Icon(Icons.folder_open, size: 64, color: theme.dividerColor),
+                      const SizedBox(height: 16),
+                      Text(
+                        user.branchCode == null 
+                          ? 'Branch code missing. Please update your profile.' 
+                          : 'No documents uploaded yet for branch ${user.branchCode}.', 
+                        style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: documents.length,
+                itemBuilder: (context, index) {
+                  final doc = documents[index];
+                  return _buildDocCard(context, ref, doc);
+                }
+              ),
+            const SizedBox(height: AppSpacing.xl),
+            Text('System Intelligence', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
+            const SizedBox(height: AppSpacing.m),
+            _buildDocItem(
+              context,
+              'Daily Operations Summary', 
+              'Automated yield & efficiency metrics', 
+              'LIVE REPORT', 
+              Colors.green,
+              onTap: () {},
+            ),
+          ],
+        ),
       ),
     );
 
@@ -182,8 +186,8 @@ class DocumentsScreen extends ConsumerWidget {
                   doc.fileUrl,
                   fit: BoxFit.cover,
                   errorBuilder: (context, error, stackTrace) => Container(
-                    color: Colors.grey.shade100,
-                    child: const Icon(Icons.broken_image, color: Colors.grey),
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    child: Icon(Icons.broken_image, color: theme.dividerColor),
                   ),
                 ),
               )
@@ -196,18 +200,18 @@ class DocumentsScreen extends ConsumerWidget {
               ),
             ListTile(
               contentPadding: const EdgeInsets.all(AppSpacing.m),
-              title: Text(doc.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              title: Text(doc.title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: theme.colorScheme.onSurface)),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const SizedBox(height: 4),
-                  Text(doc.description, style: const TextStyle(fontSize: 12)),
+                  Text(doc.description, style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      const Icon(Icons.calendar_today, size: 10, color: Colors.grey),
+                      Icon(Icons.calendar_today, size: 10, color: theme.colorScheme.onSurfaceVariant),
                       const SizedBox(width: 4),
-                      Text(DateFormat('MMM dd, yyyy').format(doc.createdAt), style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                      Text(DateFormat('MMM dd, yyyy').format(doc.createdAt), style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
                     ],
                   ),
                 ],
@@ -230,17 +234,18 @@ class DocumentsScreen extends ConsumerWidget {
   }
 
   Widget _buildDocItem(BuildContext context, String title, String subtitle, String tag, Color tagColor, {required VoidCallback onTap}) {
+    final theme = Theme.of(context);
     return Card(
       child: ListTile(
-        leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+        leading: const Icon(Icons.insights, color: Colors.blue),
         title: Text(
           title, 
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: theme.colorScheme.onSurface),
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
           subtitle, 
-          style: const TextStyle(fontSize: 11),
+          style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
           overflow: TextOverflow.ellipsis,
         ),
         trailing: Container(

@@ -39,6 +39,29 @@ class SalaryNotifier extends StateNotifier<List<SalaryRecord>> {
   List<SalaryRecord> getPaymentsForUser(String userId) {
     return state.where((p) => p.userId == userId).toList();
   }
+
+  Future<void> updatePayment(SalaryRecord updated) async {
+    try {
+      await _service.updateSalaryPayment(updated);
+      state = [
+        for (final r in state)
+          if (r.id == updated.id) updated else r
+      ];
+    } catch (e) {
+      debugPrint('Salary Engine Update Error: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deletePayment(String id) async {
+    try {
+      await _service.deleteSalaryPayment(id);
+      state = state.where((r) => r.id != id).toList();
+    } catch (e) {
+      debugPrint('Salary Engine Delete Error: $e');
+      rethrow;
+    }
+  }
 }
 
 final salaryServiceProvider = Provider<SupabaseSalaryService>((ref) {

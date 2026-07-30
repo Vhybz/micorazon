@@ -31,6 +31,8 @@ import '../../widgets/role_pop_scope.dart';
 import '../../services/held_receipt_provider.dart';
 import '../../services/birthday_service.dart';
 import '../../services/branch_provider.dart';
+import '../../widgets/phone_prompt_dialog.dart';
+import '../../widgets/passcode_guard.dart';
 
 enum POSView { sales, history }
 
@@ -55,11 +57,13 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
 
   static const Map<String, List<String>> allowedCatalog = {
     'CHICKEN': [
-      'Hard Thigh', 'Soft Thigh', 'Hard Breast', 'Soft Breast', 
-      'Hard Back', 'Soft Back', 'Hard Wings', 'Soft Wings', 
-      'Hard Half Chicken', 'Soft Half Chicken', 'Hard Whole Chicken', 
-      'Soft Whole Chicken', 'Hard Drumsticks', 'Soft Drumsticks',
-      'Layer', 'Broiler'
+      'Hard Whole Chicken (Layer)', 'Soft Whole Chicken (Broiler)',
+      'Hard Thigh (Layer)', 'Soft Thigh (Broiler)', 
+      'Hard Breast (Layer)', 'Soft Breast (Broiler)', 
+      'Hard Back (Layer)', 'Soft Back (Broiler)', 
+      'Hard Wings (Layer)', 'Soft Wings (Broiler)', 
+      'Hard Drumsticks (Layer)', 'Soft Drumsticks (Broiler)',
+      'Gizzard'
     ],
     'COW': [ // Changed from BEEF to COW
       'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Cow Steak', 
@@ -143,54 +147,57 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
             );
           }
         },
-        child: Scaffold(
-          backgroundColor: theme.scaffoldBackgroundColor,
-          appBar: MainAppBar(
-            title: _currentView == POSView.sales 
-                ? 'POS System (${isWholesale ? "Wholesale" : "Retail"})' 
-                : 'Sales History',
-          ),
-          drawer: isDesktop ? null : Drawer(child: _buildSidebar(context, user, menuItems)),
-          body: Row(
-            children: [
-              if (isDesktop) _buildSidebar(context, user, menuItems),
-              Expanded(
-                child: _currentView == POSView.sales 
-                  ? _buildPOSLayout(isMobile, isDesktop)
-                  : _buildHistoryLayout(),
-              ),
-            ],
-          ),
-          bottomNavigationBar: SafeArea(child: _buildFooter()),
-          floatingActionButton: (isMobile && _currentView == POSView.sales)
-              ? SafeArea(
-                  child: FloatingActionButton.extended(
-                    onPressed: () => _showMobileCart(),
-                    label: const Text('View Cart'),
-                    icon: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        const Icon(Icons.shopping_cart),
-                        if (ref.watch(cartProvider).isNotEmpty)
-                          Positioned(
-                            right: -8,
-                            top: -8,
-                            child: CircleAvatar(
-                              radius: 8,
-                              backgroundColor: Colors.red,
-                              child: Text(
-                                '${ref.watch(cartProvider).length}',
-                                style: const TextStyle(color: Colors.white, fontSize: 8),
+        child: PasscodeGuard(
+          child: Scaffold(
+            backgroundColor: theme.scaffoldBackgroundColor,
+            appBar: MainAppBar(
+              title: _currentView == POSView.sales 
+                  ? 'POS System (${isWholesale ? "Wholesale" : "Retail"})' 
+                  : 'Sales History',
+              actions: [],
+            ),
+            drawer: isDesktop ? null : Drawer(child: _buildSidebar(context, user, menuItems)),
+            body: Row(
+              children: [
+                if (isDesktop) _buildSidebar(context, user, menuItems),
+                Expanded(
+                  child: _currentView == POSView.sales 
+                    ? _buildPOSLayout(isMobile, isDesktop)
+                    : _buildHistoryLayout(),
+                ),
+              ],
+            ),
+            bottomNavigationBar: SafeArea(child: _buildFooter()),
+            floatingActionButton: (isMobile && _currentView == POSView.sales)
+                ? SafeArea(
+                    child: FloatingActionButton.extended(
+                      onPressed: () => _showMobileCart(),
+                      label: const Text('View Cart'),
+                      icon: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          const Icon(Icons.shopping_cart),
+                          if (ref.watch(cartProvider).isNotEmpty)
+                            Positioned(
+                              right: -8,
+                              top: -8,
+                              child: CircleAvatar(
+                                radius: 8,
+                                backgroundColor: Colors.red,
+                                child: Text(
+                                  '${ref.watch(cartProvider).length}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 8),
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: theme.colorScheme.onPrimary,
                     ),
-                    backgroundColor: theme.colorScheme.primary,
-                    foregroundColor: theme.colorScheme.onPrimary,
-                  ),
-                )
-              : null,
+                  )
+                : null,
+          ),
         ),
       ),
     );
@@ -425,6 +432,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                       price: isPriced ? '₵${currentPrice.toStringAsFixed(2)}/${product.unit}' : 'UNPRICED',
                       originalPrice: hasPromo ? '₵${(isWholesale ? product.wholesalePrice : product.retailPrice).toStringAsFixed(2)}' : null,
                       stockQuantity: product.stockQuantity,
+                      isUnlimited: product.isUnlimited,
                       lowStockThreshold: product.lowStockThreshold,
                       unit: product.unit,
                       promoLabel: hasPromo ? '${product.name} - ${product.discountPercentage.toInt()}% OFF' : null,
@@ -602,7 +610,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
           ref.read(cartProvider.notifier).addItemWithCustomPrice(product, weight, price, original);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('${product.name} (${WeightConverter.formatShort(weight)}) added to cart'),
+              content: Text('${product.name} (${WeightConverter.formatShort(weight, unit: product.unit)}) added to cart'),
               duration: const Duration(seconds: 1),
             ),
           );
@@ -671,7 +679,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                     return CartItemTile(
                       name: item.product.name,
                       qty: '1',
-                      weight: WeightConverter.formatShort(item.quantity),
+                      weight: WeightConverter.formatShort(item.quantity, unit: item.product.unit),
                       amount: '₵${item.total.toStringAsFixed(2)}',
                       onDelete: () => notifier.removeItem(index),
                     );
@@ -1261,7 +1269,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(child: Text(e.key, style: const TextStyle(fontWeight: FontWeight.bold))),
-            Text(WeightConverter.formatShort(e.value), 
+            Text(WeightConverter.formatShort(e.value, unit: 'kg'), // Fallback to kg for history aggregation
               style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w900)),
           ],
         ),
@@ -1269,8 +1277,136 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     );
   }
 
+  void _showReceiptOptionsDialog(SaleRecord sale) {
+    final currentBranch = ref.read(currentBranchProvider);
+    bool isProcessing = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)), // Rectangular
+          title: const Row(
+            children: [
+              Icon(Icons.receipt_long_rounded, color: AppColors.primaryMaroon),
+              SizedBox(width: 12),
+              Text('RECEIPT OPTIONS', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0, fontSize: 16)),
+            ],
+          ),
+          content: isProcessing 
+            ? const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()))
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _receiptOptionTile(
+                    context,
+                    icon: Icons.print_rounded,
+                    title: 'PRINT RECEIPT',
+                    subtitle: 'Send to thermal printer',
+                    onTap: () async {
+                      setState(() => isProcessing = true);
+                      await ReceiptService.printReceipt(sale);
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _receiptOptionTile(
+                    context,
+                    icon: Icons.sms_rounded,
+                    title: 'SEND VIA SMS',
+                    subtitle: sale.customerPhone ?? 'Enter custom number',
+                    enabled: true,
+                    onTap: () async {
+                      String? targetPhone = sale.customerPhone;
+                      
+                      if (targetPhone == null || targetPhone.isEmpty) {
+                        targetPhone = await PhonePromptDialog.show(context);
+                      }
+
+                      if (targetPhone != null && targetPhone.isNotEmpty) {
+                        setState(() => isProcessing = true);
+                        final success = await SmsService.sendReceiptSms(
+                          sale, 
+                          branchName: currentBranch?.name,
+                          customPhone: targetPhone,
+                        );
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(success ? 'SMS Sent' : 'SMS Failed'),
+                              backgroundColor: success ? Colors.green : Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _receiptOptionTile(
+                    context,
+                    icon: Icons.share_rounded,
+                    title: 'SHARE PDF (WHATSAPP)',
+                    subtitle: 'Share via WhatsApp or Email',
+                    onTap: () async {
+                      setState(() => isProcessing = true);
+                      await ReceiptService.shareReceipt(sale);
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                  ),
+                ],
+              ),
+          actions: [
+            TextButton(
+              onPressed: isProcessing ? null : () => Navigator.pop(context),
+              child: const Text('CANCEL', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _receiptOptionTile(BuildContext context, {
+    required IconData icon, 
+    required String title, 
+    required String subtitle, 
+    required VoidCallback onTap,
+    bool enabled = true,
+  }) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(2),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: enabled ? theme.colorScheme.primary.withValues(alpha: 0.05) : theme.disabledColor.withValues(alpha: 0.03),
+          borderRadius: BorderRadius.circular(2),
+          border: Border.all(color: enabled ? theme.colorScheme.primary.withValues(alpha: 0.1) : theme.disabledColor.withValues(alpha: 0.1)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: enabled ? theme.colorScheme.primary : theme.disabledColor, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: enabled ? theme.colorScheme.onSurface : theme.disabledColor, letterSpacing: 0.5)),
+                  Text(subtitle, style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+            if (enabled) Icon(Icons.keyboard_arrow_right_rounded, color: theme.colorScheme.primary.withValues(alpha: 0.3), size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showSaleDetails(SaleRecord sale) {
-    bool isPrinting = false;
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -1410,7 +1546,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                                         maxLines: 2,
                                         overflow: TextOverflow.ellipsis,
                                       ),
-                                      Text('${WeightConverter.formatShort(item.quantity)} x ₵${item.priceAtSale.toStringAsFixed(2)}', 
+                                      Text('${WeightConverter.formatShort(item.quantity, unit: item.product.unit)} x ₵${item.priceAtSale.toStringAsFixed(2)}', 
                                         style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
                                       ),
                                     ],
@@ -1548,18 +1684,9 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                           child: Text('Close', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12))
                         ),
                         ElevatedButton.icon(
-                          onPressed: isPrinting ? null : () async {
-                            setState(() => isPrinting = true);
-                            try {
-                              await ReceiptService.printReceipt(sale);
-                            } finally {
-                              if (mounted) setState(() => isPrinting = false);
-                            }
-                          },
-                          icon: isPrinting 
-                            ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.print, size: 14),
-                          label: const Text('REPRINT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                          onPressed: () => _showReceiptOptionsDialog(sale),
+                          icon: const Icon(Icons.receipt_long_rounded, size: 14),
+                          label: const Text('RECEIPT OPTIONS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppColors.accentOrange, 
                             foregroundColor: Colors.white,
@@ -1819,6 +1946,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
       case SaleStatus.rectified: return Colors.blue;
       case SaleStatus.pendingCorrection: return Colors.orange;
       case SaleStatus.cancelled: return Colors.red;
+      case SaleStatus.reversed: return Colors.red.shade900;
       case SaleStatus.awaitingDeposit: return Colors.purple;
     }
   }
@@ -1864,6 +1992,7 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
   WeightUnit _unit = WeightUnit.kg;
   double _weight = 1.0;
   int _quantity = 1;
+  bool _isHalf = false; // Added for whole chicken logic
 
   void _toggleUnit(WeightUnit unit) {
     if (_unit == unit) return;
@@ -1883,12 +2012,22 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
   @override
   void initState() {
     super.initState();
-    _unit = WeightUnit.values.firstWhere(
-      (u) => u.name == widget.product.unit, 
-      orElse: () => WeightUnit.kg
-    );
-    _weight = 1.0;
-    _weightController = TextEditingController(text: '1.0');
+    final String pName = widget.product.name.toUpperCase();
+    final String pCat = widget.product.category.toUpperCase();
+    
+    // Auto-detect Goat/Sheep Head and default to Qty
+    if (pName.contains('HEAD') && (pCat.contains('GOAT') || pCat.contains('SHEEP'))) {
+      _unit = WeightUnit.unit;
+      _weight = 1.0;
+    } else {
+      _unit = WeightUnit.values.firstWhere(
+        (u) => u.name == widget.product.unit, 
+        orElse: () => WeightUnit.kg
+      );
+      _weight = 1.0;
+    }
+    
+    _weightController = TextEditingController(text: _weight.toStringAsFixed(_unit == WeightUnit.unit ? 0 : 1));
   }
 
   @override
@@ -1901,13 +2040,24 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final bool isWholeChicken = widget.product.name.contains('Whole Chicken');
+
     return Consumer(
       builder: (context, ref, _) {
         final isWholesale = ref.watch(isWholesaleProvider);
         final isPcs = _unit == WeightUnit.unit;
         
-        final kgWeight = isPcs ? _weight : (_unit == WeightUnit.kg ? _weight : WeightConverter.toKg(_weight));
-        final currentPrice = widget.product.getPrice(isWholesale, weight: kgWeight, customer: widget.customer);
+        // Universal Weight Calculation (to KG for pricing)
+        double kgWeight = _weight;
+        if (_unit == WeightUnit.lb) {
+          kgWeight = WeightConverter.toKg(_weight);
+        } else if (_unit == WeightUnit.g) {
+          kgWeight = WeightConverter.fromG(_weight);
+        } else if (isPcs) {
+          kgWeight = _weight; // Pieces are treated as units for pricing
+        }
+
+        final currentPrice = widget.product.getPrice(isWholesale, weight: isPcs ? 1.0 : kgWeight, customer: widget.customer);
         final hasPromo = widget.product.isPromoActiveFor(isWholesale, widget.customer);
         final basePrice = isWholesale ? (widget.product.wholesalePrice) : (widget.product.retailPrice);
         
@@ -1922,7 +2072,17 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
           }
         }
 
-        final total = isPcs ? (_weight * currentPrice * _quantity) : (kgWeight * currentPrice * _quantity);
+        // Half Chicken Logic Integration
+        final double finalEffectiveQty = _isHalf ? 0.5 : _weight;
+        
+        // Final Price Logic
+        // If it's a Half bird, price is (Unit Price / 2). 
+        // If it's Weight-based (kg/g/lb), it's (Weight * Price).
+        // If it's Piece-based (pcs), it's (Qty * Price).
+        final double finalPrice = _isHalf ? (currentPrice / 2) : currentPrice;
+        final double total = isPcs 
+            ? (finalEffectiveQty * finalPrice * _quantity) 
+            : (kgWeight * currentPrice * _quantity);
 
         return Dialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
@@ -1937,7 +2097,7 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
                   children: [
                     Text(
                       widget.product.category.toUpperCase(),
-                      style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                      style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 1.2),
                     ),
                     Text(
                       widget.product.name,
@@ -1945,32 +2105,60 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: AppSpacing.m),
-                    if (!isPcs)
+                    if (isWholeChicken) ...[
+                      const Text('SELECT SIZE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1)),
+                      const SizedBox(height: 8),
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          ChoiceChip(
-                            label: const Text('KG', style: TextStyle(fontSize: 11)), 
-                            selected: _unit == WeightUnit.kg, 
-                            onSelected: (_) => _toggleUnit(WeightUnit.kg)
+                          Expanded(
+                            child: ChoiceChip(
+                              label: const Center(child: Text('FULL BIRD')),
+                              selected: !_isHalf,
+                              onSelected: (v) => setState(() => _isHalf = false),
+                            ),
                           ),
                           const SizedBox(width: 8),
-                          ChoiceChip(
-                            label: const Text('LB', style: TextStyle(fontSize: 11)), 
-                            selected: _unit == WeightUnit.lb, 
-                            onSelected: (_) => _toggleUnit(WeightUnit.lb)
+                          Expanded(
+                            child: ChoiceChip(
+                              label: const Center(child: Text('HALF BIRD')),
+                              selected: _isHalf,
+                              onSelected: (v) => setState(() => _isHalf = true),
+                            ),
                           ),
                         ],
-                      )
-                    else
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text('PRICED PER UNIT/PCS', style: TextStyle(color: theme.colorScheme.primary, fontSize: 10, fontWeight: FontWeight.bold)),
                       ),
+                      const SizedBox(height: AppSpacing.m),
+                    ],
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Column(
+                          children: [
+                            const Text('SELECT UNIT', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                            const SizedBox(height: 4),
+                            ToggleButtons(
+                              constraints: const BoxConstraints(minWidth: 55, minHeight: 40),
+                              isSelected: [
+                                _unit == WeightUnit.kg, 
+                                _unit == WeightUnit.g,
+                                _unit == WeightUnit.lb,
+                                _unit == WeightUnit.unit,
+                              ],
+                              onPressed: (index) => _toggleUnit(WeightUnit.values[index]),
+                              borderRadius: BorderRadius.circular(8),
+                              selectedColor: Colors.white,
+                              fillColor: theme.colorScheme.primary,
+                              children: const [
+                                Text('kg', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                Text('g', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                Text('lb', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                Text('pcs', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                     const SizedBox(height: AppSpacing.m),
                     Row(
                       children: [
@@ -1978,11 +2166,12 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
                           child: TextFormField(
                             controller: _weightController,
                             textAlign: TextAlign.center,
+                            enabled: !_isHalf,
                             decoration: InputDecoration(
                               labelText: isPcs ? 'Quantity' : 'Weight',
                               suffixText: isPcs ? 'pcs' : _unit.name,
                               contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                              errorText: (isPcs ? _weight : kgWeight) > widget.product.stockQuantity 
+                              errorText: (isPcs ? finalEffectiveQty : kgWeight) > widget.product.stockQuantity 
                                 ? 'Only ${widget.product.stockQuantity}${isPcs ? "pcs" : "kg"} available' 
                                 : null,
                             ),
@@ -1990,6 +2179,7 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
                             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                             onChanged: (v) => setState(() => _weight = double.tryParse(v) ?? 0),
                             validator: (v) {
+                              if (_isHalf) return null;
                               if (v == null || (double.tryParse(v) ?? 0) <= 0) return '!';
                               final val = double.tryParse(v) ?? 0;
                               final checkWeight = isPcs ? val : (_unit == WeightUnit.kg ? val : WeightConverter.toKg(val));
@@ -2050,7 +2240,7 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
                                 style: TextStyle(color: theme.colorScheme.onSurfaceVariant, decoration: TextDecoration.lineThrough, fontSize: 12)),
                               const SizedBox(width: 6),
                             ],
-                            Text('₵${currentPrice.toStringAsFixed(2)}/${isPcs ? "unit" : "kg"}', 
+                            Text('₵${finalPrice.toStringAsFixed(2)}/${isPcs ? "unit" : "kg"}', 
                               style: TextStyle(color: hasPromo ? Colors.orange.shade800 : theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 14)),
                           ],
                         ),
@@ -2058,21 +2248,35 @@ class _ProductWeightDialogState extends State<ProductWeightDialog> {
                           'Total: ₵${total.toStringAsFixed(2)}',
                           style: TextStyle(fontWeight: FontWeight.w900, fontSize: 24, color: theme.colorScheme.primary),
                         ),
+                        if (_isHalf)
+                          const Text('(Half Bird Pricing Applied)', style: TextStyle(fontSize: 10, fontStyle: FontStyle.italic, color: Colors.grey)),
                       ],
                     ),
                     const SizedBox(height: AppSpacing.m),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: (widget.product.stockQuantity <= 0 || (isPcs ? _weight : (kgWeight * _quantity)) > widget.product.stockQuantity)
+                        onPressed: (widget.product.stockQuantity <= 0 || (isPcs ? finalEffectiveQty : (kgWeight * _quantity)) > widget.product.stockQuantity)
                           ? null 
                           : () {
                             if (_formKey.currentState!.validate()) {
                               final isWholesale = ref.read(isWholesaleProvider);
-                              final effectiveWeight = isPcs ? _weight : (_unit == WeightUnit.kg ? _weight : WeightConverter.toKg(_weight));
-                              final currentPrice = widget.product.getPrice(isWholesale, weight: effectiveWeight, customer: widget.customer);
+                              
+                              // Calculate final normalized weight/qty for inventory
+                              double effectiveQty = _isHalf ? 0.5 : _weight;
+                              if (_unit == WeightUnit.lb && !_isHalf) {
+                                effectiveQty = WeightConverter.toKg(_weight);
+                              } else if (_unit == WeightUnit.g && !_isHalf) {
+                                effectiveQty = WeightConverter.fromG(_weight);
+                              }
+
+                              final double actualSalePrice = _isHalf 
+                                  ? (widget.product.getPrice(isWholesale, weight: 1.0, customer: widget.customer) / 2) 
+                                  : widget.product.getPrice(isWholesale, weight: isPcs ? 1.0 : effectiveQty, customer: widget.customer);
+                              
                               double comparisonPrice = isWholesale ? (widget.product.wholesalePrice) : (widget.product.retailPrice);
-                              widget.onAdd(effectiveWeight * (isPcs ? 1 : _quantity), currentPrice, comparisonPrice);
+                              
+                              widget.onAdd(effectiveQty * (_isHalf ? 1 : _quantity), actualSalePrice, comparisonPrice);
                               Navigator.pop(context);
                             }
                           },
@@ -2648,8 +2852,6 @@ class ReceiptSuccessDialog extends StatefulWidget {
 }
 
 class _ReceiptSuccessDialogState extends State<ReceiptSuccessDialog> {
-  bool _isPrinting = false;
-
   @override
   Widget build(BuildContext context) {
     return Dialog(
@@ -2795,18 +2997,9 @@ class _ReceiptSuccessDialogState extends State<ReceiptSuccessDialog> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: _isPrinting ? null : () async {
-                  setState(() => _isPrinting = true);
-                  try {
-                    await ReceiptService.printReceipt(widget.sale);
-                  } finally {
-                    if (mounted) setState(() => _isPrinting = false);
-                  }
-                },
-                icon: _isPrinting 
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) 
-                  : const Icon(Icons.print_rounded, size: 20),
-                label: const Text('PRINT RECEIPT', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
+                onPressed: () => _showReceiptOptionsDialog(widget.sale),
+                icon: const Icon(Icons.receipt_long_rounded, size: 20),
+                label: const Text('VIEW RECEIPT OPTIONS', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accentOrange,
                   foregroundColor: Colors.white,
@@ -2821,6 +3014,62 @@ class _ReceiptSuccessDialogState extends State<ReceiptSuccessDialog> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showReceiptOptionsDialog(SaleRecord sale) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Receipt Options'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.print, color: Colors.blue),
+              title: const Text('Print Physical Receipt'),
+              onTap: () {
+                Navigator.pop(context);
+                ReceiptService.printReceipt(sale);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share, color: Colors.green),
+              title: const Text('Share Digital Receipt (PDF)'),
+              onTap: () {
+                Navigator.pop(context);
+                ReceiptService.shareReceipt(sale);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.sms, color: Colors.orange),
+              title: const Text('Send SMS Confirmation'),
+              onTap: () async {
+                String? targetPhone = sale.customerPhone;
+                if (targetPhone == null || targetPhone.isEmpty) {
+                  targetPhone = await PhonePromptDialog.show(context);
+                }
+
+                if (targetPhone != null && targetPhone.isNotEmpty) {
+                  final success = await SmsService.sendReceiptSms(sale, customPhone: targetPhone);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(success ? 'SMS Sent' : 'SMS Failed'),
+                        backgroundColor: success ? Colors.green : Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
       ),
     );
   }

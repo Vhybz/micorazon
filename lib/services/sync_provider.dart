@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'transfer_provider.dart';
 import 'customer_provider.dart';
 import 'expense_provider.dart';
@@ -89,4 +90,11 @@ class SyncNotifier extends StateNotifier<DateTime> with WidgetsBindingObserver {
 
 final syncProvider = StateNotifierProvider<SyncNotifier, DateTime>((ref) {
   return SyncNotifier(ref);
+});
+
+final connectivityStatusProvider = StreamProvider<List<ConnectivityResult>>((ref) async* {
+  // Yield initial state
+  yield await Connectivity().checkConnectivity();
+  // Then yield subsequent changes
+  yield* Connectivity().onConnectivityChanged;
 });

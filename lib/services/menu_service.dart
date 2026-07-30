@@ -26,6 +26,7 @@ class MenuService {
       SidebarItem(icon: Icons.payments_rounded, label: 'Salary Management', route: '/admin/salaries'),
       SidebarItem(icon: Icons.folder_open_rounded, label: 'Compliance Documents', route: '/admin/documents'),
       SidebarItem(icon: Icons.history_rounded, label: 'Company Recents', route: '/admin/recents'),
+      SidebarItem(icon: Icons.security_update_good_rounded, label: 'System Audit Trail', route: '/admin/audit'),
       SidebarItem(icon: Icons.qr_code_scanner_rounded, label: 'Verify Incoming Stock', route: '/cashier/verify-stock'),
       SidebarItem(icon: Icons.build_circle_rounded, label: 'System Maintenance', route: '/admin/maintenance'),
     ];
@@ -53,6 +54,7 @@ class MenuService {
                                   item.route == '/admin/salaries' ||
                                   item.route == '/admin/staff' ||
                                   item.route == '/admin/recents' || 
+                                  item.route == '/admin/audit' || 
                                   item.route == '/admin/maintenance' ||
                                   item.route == '/admin/settings';
         

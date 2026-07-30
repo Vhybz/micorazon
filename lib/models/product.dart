@@ -49,6 +49,7 @@ class Product {
   final PromoTarget promoTarget;
   final PromoCustomerTarget promoCustomerTarget;
   final bool isDeleted; // Soft delete
+  final bool isUnlimited; // Stock doesn't decrease on sales
   final double lowStockThreshold;
   final double dailyStockAdded;
   final DateTime? lastStockUpdate;
@@ -72,6 +73,7 @@ class Product {
     this.promoTarget = PromoTarget.both,
     this.promoCustomerTarget = PromoCustomerTarget.all,
     this.isDeleted = false,
+    this.isUnlimited = false,
     this.lowStockThreshold = 5.0, // Default threshold
     this.dailyStockAdded = 0.0,
     this.lastStockUpdate,
@@ -143,6 +145,7 @@ class Product {
     String? unit,
     String? imageUrl,
     bool? isDeleted,
+    bool? isUnlimited,
     double? lowStockThreshold,
     double? dailyStockAdded,
     DateTime? lastStockUpdate,
@@ -166,6 +169,7 @@ class Product {
       promoTarget: promoTarget ?? this.promoTarget,
       promoCustomerTarget: promoCustomerTarget ?? this.promoCustomerTarget,
       isDeleted: isDeleted ?? this.isDeleted,
+      isUnlimited: isUnlimited ?? this.isUnlimited,
       lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,
       dailyStockAdded: dailyStockAdded ?? this.dailyStockAdded,
       lastStockUpdate: lastStockUpdate ?? this.lastStockUpdate,
@@ -197,6 +201,7 @@ class Product {
       promoTarget: PromoTarget.values.byName(map['promo_target'] ?? 'both'),
       promoCustomerTarget: PromoCustomerTarget.values.byName(map['promo_customer_target'] ?? 'all'),
       isDeleted: map['is_deleted'] ?? false,
+      isUnlimited: map['is_unlimited'] ?? false,
       lowStockThreshold: (map['low_stock_threshold'] as num? ?? 5.0).toDouble(),
       dailyStockAdded: (map['daily_stock_added'] as num? ?? 0.0).toDouble(),
       lastStockUpdate: map['last_stock_update'] != null ? DateTime.parse(map['last_stock_update']) : null,
@@ -222,6 +227,7 @@ class Product {
         'promo_target': promoTarget.name,
         'promo_customer_target': promoCustomerTarget.name,
         'is_deleted': isDeleted,
+        'is_unlimited': isUnlimited,
         'low_stock_threshold': lowStockThreshold,
         'daily_stock_added': dailyStockAdded,
         'last_stock_update': lastStockUpdate?.toIso8601String(),

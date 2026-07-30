@@ -1,0 +1,5 @@
+- [x] Implement name-splitting helper in `InventoryControlScreen`
+- [x] Update mobile and desktop layouts in `InventoryControlScreen` to use the new name builder
+- [x] Implement name-splitting helper in `ProductCard`
+- [x] Refine `ProductCard` layout to display name and range on separate lines
+- [x] Verify alignment and readability across all device views

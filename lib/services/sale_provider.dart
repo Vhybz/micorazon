@@ -130,12 +130,14 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
     // 5. Update stock if verified
     if (saleWithBranch.isVerified) {
       for (final item in saleWithBranch.items) {
-        await ref.read(productsFutureProvider.notifier).updateStock(
-          item.product.id, 
-          -item.quantity, 
-          reason: 'SALE', 
-          referenceId: saleWithBranch.id,
-        );
+        if (!item.product.isUnlimited) {
+          await ref.read(productsFutureProvider.notifier).updateStock(
+            item.product.id, 
+            -item.quantity, 
+            reason: 'SALE', 
+            referenceId: saleWithBranch.id,
+          );
+        }
       }
     }
   }
@@ -163,7 +165,7 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
 
       final connectivity = await Connectivity().checkConnectivity();
       if (!connectivity.contains(ConnectivityResult.none)) {
-        await _service.updateSale(updatedSale);
+        await _service.saveSale(updatedSale);
       } else {
         await OfflineSyncService.addToQueue(
           actionType: 'SALE',
@@ -173,12 +175,14 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
       }
 
       for (final item in sale.items) {
-        await ref.read(productsFutureProvider.notifier).updateStock(
-          item.product.id, 
-          -item.quantity, 
-          reason: 'SALE', 
-          referenceId: sale.id,
-        );
+        if (!item.product.isUnlimited) {
+          await ref.read(productsFutureProvider.notifier).updateStock(
+            item.product.id, 
+            -item.quantity, 
+            reason: 'SALE', 
+            referenceId: sale.id,
+          );
+        }
       }
     } catch (e) {
       debugPrint('Verify Sale Error: $e');
@@ -187,6 +191,63 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
 
   Future<void> updateSale(SaleRecord updatedSale) async {
     try {
+      final oldSale = state.where((s) => s.id == updatedSale.id).firstOrNull;
+      if (oldSale == null) return;
+
+      // 1. Reconciliation Logic for Stock
+      // Process items in the updated sale
+      for (final newItem in updatedSale.items) {
+        if (newItem.product.isUnlimited) continue;
+        
+        final oldItem = oldSale.items.where((i) => i.product.id == newItem.product.id).firstOrNull;
+        if (oldItem != null) {
+          final diff = oldItem.quantity - newItem.quantity;
+          if (diff != 0) {
+             // If old > new, diff is positive (e.g. 10 - 8 = 2), so we add 2 back to stock.
+             // If old < new, diff is negative (e.g. 5 - 7 = -2), so we subtract 2 from stock.
+             await ref.read(productsFutureProvider.notifier).updateStock(
+               newItem.product.id, 
+               diff, 
+               reason: 'SALE_RECTIFIED', 
+               referenceId: updatedSale.id,
+             );
+          }
+        } else {
+          // New product added to existing receipt: subtract full quantity
+          await ref.read(productsFutureProvider.notifier).updateStock(
+            newItem.product.id, 
+            -newItem.quantity, 
+            reason: 'SALE_RECTIFIED', 
+            referenceId: updatedSale.id,
+          );
+        }
+      }
+      
+      // Check for removed products: add their full quantity back to stock
+      for (final oldItem in oldSale.items) {
+        if (oldItem.product.isUnlimited) continue;
+        final stillExists = updatedSale.items.any((i) => i.product.id == oldItem.product.id);
+        if (!stillExists) {
+           await ref.read(productsFutureProvider.notifier).updateStock(
+             oldItem.product.id, 
+             oldItem.quantity, 
+             reason: 'SALE_RECTIFIED', 
+             referenceId: updatedSale.id,
+           );
+        }
+      }
+
+      // 2. Audit Log
+      await AuditService.log(
+        ref: ref,
+        action: 'SALE_RECTIFIED',
+        entityType: 'SALE',
+        entityId: updatedSale.id,
+        oldData: oldSale.toJson(),
+        newData: updatedSale.toJson(),
+      );
+
+      // 3. Database Update
       final connectivity = await Connectivity().checkConnectivity();
       if (!connectivity.contains(ConnectivityResult.none)) {
         await _service.updateSale(updatedSale);
@@ -195,8 +256,11 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
           actionType: 'SALE',
           data: updatedSale.toJson(),
         );
-        state = [for (final s in state) if (s.id == updatedSale.id) updatedSale else s];
       }
+
+      // 4. State Update
+      state = [for (final s in state) if (s.id == updatedSale.id) updatedSale else s];
+      _saveToCache(state);
       
       // Auto-Register Debtor if update created a debt
       _ensureCustomerRegistered(updatedSale);
@@ -221,6 +285,58 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
         // addCustomer is optimistic and non-blocking
         ref.read(customerProvider.notifier).addCustomer(newCustomer);
       }
+    }
+  }
+
+  Future<void> reverseSale(String saleId) async {
+    try {
+      final sale = state.firstWhere((s) => s.id == saleId);
+      
+      // 1. Audit Log (Source of truth tracking)
+      await AuditService.log(
+        ref: ref,
+        action: 'SALE_REVERSED',
+        entityType: 'SALE',
+        entityId: saleId,
+        newData: {'id': saleId, 'status': 'reversed', 'reason': 'ADMIN_REVERSE'},
+      );
+
+      // 2. Restore Stock
+      for (final item in sale.items) {
+        if (!item.product.isUnlimited) {
+          // Add back the quantity sold
+          await ref.read(productsFutureProvider.notifier).updateStock(
+            item.product.id, 
+            item.quantity, 
+            reason: 'SALE_REVERSED', 
+            referenceId: saleId,
+          );
+        }
+      }
+
+      // 3. Update status to Reversed (Do not delete)
+      final reversedSale = sale.copyWith(status: SaleStatus.reversed);
+      
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateSale(reversedSale);
+      } else {
+        await OfflineSyncService.addToQueue(
+          actionType: 'SALE',
+          data: reversedSale.toJson(),
+        );
+      }
+
+      // 4. Update local state
+      state = [
+        for (final s in state)
+          if (s.id == saleId) reversedSale else s
+      ];
+      _saveToCache(state);
+
+    } catch (e) {
+      debugPrint('Reverse Sale Error: $e');
+      rethrow;
     }
   }
 

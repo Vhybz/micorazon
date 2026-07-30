@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_model.dart';
 import '../services/user_provider.dart';
 import '../services/auth_provider.dart';
+import '../services/audit_service.dart';
 import 'auth/password_recovery_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -83,6 +84,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         // Successful login
         ref.read(currentUserIdProvider.notifier).state = userAccount.id;
 
+        // 3. Log Audit Event
+        await AuditService.log(
+          ref: ref,
+          action: 'USER_SIGNED_IN',
+          entityType: 'USER',
+          entityId: userAccount.id,
+        );
+
         if (mounted) {
           switch (userAccount.activePrimaryRole) {
             case UserRole.admin:
@@ -105,14 +114,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         String title = AppStrings.loginFailedTitle;
         String errorMessage = e.toString();
         
-        // Handle common Supabase Auth errors gracefully
+        // Handle common Supabase Auth and Network errors gracefully
         if (errorMessage.contains('Invalid login credentials')) {
           errorMessage = AppStrings.invalidCredentialsError;
         } else if (errorMessage.contains('Email not confirmed')) {
           errorMessage = AppStrings.emailNotConfirmedError;
         } else if (errorMessage.contains('User not found')) {
           errorMessage = AppStrings.userNotFoundError;
-        } else if (errorMessage.contains('network')) {
+        } else if (errorMessage.contains('network') || 
+                   errorMessage.contains('SocketException') || 
+                   errorMessage.contains('Failed host lookup') ||
+                   errorMessage.contains('handshake') ||
+                   errorMessage.contains('errno = 7')) {
           errorMessage = AppStrings.networkError;
         }
 

@@ -234,7 +234,7 @@ class _IncomingStockDialogState extends ConsumerState<IncomingStockDialog> {
                                                 color: theme.colorScheme.surfaceContainerHighest,
                                                 borderRadius: BorderRadius.circular(4),
                                               ),
-                                              child: Text(WeightConverter.formatShort(t.weight), 
+                                              child: Text(WeightConverter.formatShort(t.weight, unit: t.unit), 
                                                 style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: theme.colorScheme.primary)
                                               ),
                                             ),

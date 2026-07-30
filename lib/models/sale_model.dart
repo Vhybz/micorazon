@@ -2,7 +2,7 @@ import 'product.dart';
 
 enum PaymentMethod { cash, mobileMoney, bankDeposit }
 
-enum SaleStatus { completed, pendingCorrection, rectified, cancelled, awaitingDeposit }
+enum SaleStatus { completed, pendingCorrection, rectified, cancelled, awaitingDeposit, reversed }
 
 class PaymentDetail {
   final PaymentMethod method;
@@ -190,6 +190,8 @@ class SaleRecord {
 
   double get amountPaid => payments.fold(0, (sum, p) => sum + p.amount);
   double get balance => totalAmount - amountPaid;
+
+  bool get isActive => status != SaleStatus.cancelled && status != SaleStatus.reversed;
 
   SaleRecord copyWith({
     String? branchCode,

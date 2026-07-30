@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
+import '../../core/utils.dart';
 import '../../core/uuid_utils.dart';
 import '../../widgets/status_chip.dart';
 import '../../models/butcher_models.dart';
@@ -250,7 +251,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
         children: [
           const Text('TODAY\'S PRODUCTION OUTPUT', style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
           const SizedBox(height: 8),
-          Text('${totalWeight.toStringAsFixed(1)} kg', style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          Text(WeightConverter.formatShort(totalWeight, unit: 'kg'), style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
           Text('Across ${todayCuts.length} individual items packaged', style: const TextStyle(color: Colors.white60, fontSize: 12)),
         ],
       ),
@@ -314,7 +315,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                     const SizedBox(height: 4),
                     Text('TAG: ${log.tagNumber ?? log.id.substring(0,8)}', 
                       style: const TextStyle(fontSize: 11, color: AppColors.textLight, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
-                    Text('INTAKE WEIGHT: ${log.meatWeight}kg', 
+                    Text('INTAKE WEIGHT: ${WeightConverter.formatShort(log.meatWeight, unit: 'kg')}', 
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
                     const Spacer(),
                     SizedBox(
@@ -431,7 +432,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                       children: [
                         const Text('CARCASS BREAKDOWN', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.grey)),
                         Flexible(
-                          child: Text('Total Intake: ${batch.weight} kg', 
+                          child: Text('Total Intake: ${WeightConverter.formatShort(batch.weight, unit: 'kg')}', 
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -458,7 +459,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Text('${cut.weight} kg', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text(WeightConverter.formatShort(cut.weight, unit: cut.unit), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             const SizedBox(width: 8),
                             IconButton(
                               icon: const Icon(Icons.print, size: 16, color: Colors.grey),
@@ -483,7 +484,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            Text('${wastedWeight.toStringAsFixed(1)} kg', 
+                            Text(WeightConverter.formatShort(wastedWeight, unit: 'kg'), 
                               style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 13)
                             ),
                             const SizedBox(width: 24), // Spacer for align
@@ -501,7 +502,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Text('${totalAccounted.toStringAsFixed(1)} / ${batch.weight} kg', 
+                        Text('${WeightConverter.formatShort(totalAccounted, unit: 'kg')} / ${WeightConverter.formatShort(batch.weight, unit: 'kg')}', 
                           style: const TextStyle(fontSize: 11, color: AppColors.textLight)),
                       ],
                     ),
@@ -587,6 +588,8 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     }
     final availableCuts = animalType?.standardCuts ?? [];
     String? selectedCut;
+    String selectedUnit = 'kg';
+    String weightDisplayUnit = 'kg'; // Added for g/kg toggle
     String dispatchTarget = 'BRANCH'; // 'BRANCH' or 'INDIVIDUAL'
     String? selectedBranchCode;
 
@@ -620,14 +623,69 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                       isExpanded: true,
                       decoration: const InputDecoration(labelText: 'Select Part/Cut', border: OutlineInputBorder()),
                       items: availableCuts.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                      onChanged: (v) => setState(() => selectedCut = v),
+                      onChanged: (v) => setState(() {
+                        selectedCut = v;
+                        if (v != null && animalType != null) {
+                          selectedUnit = animalType.defaultUnitFor(v);
+                          final defaultVal = animalType.defaultValueFor(v);
+                          if (defaultVal != null) {
+                            weightController.text = defaultVal.toStringAsFixed(0);
+                          }
+                        }
+                      }),
                     ),
                     const SizedBox(height: 16),
-                    TextField(
-                      controller: weightController,
-                      decoration: const InputDecoration(labelText: 'Weight (kg)', border: OutlineInputBorder(), suffixText: 'kg'),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: weightController,
+                            decoration: InputDecoration(
+                              labelText: selectedUnit == 'Qty' ? 'Quantity' : (weightDisplayUnit == 'g' ? 'Weight (grams)' : 'Weight (kg)'), 
+                              border: const OutlineInputBorder(), 
+                              suffixText: selectedUnit == 'Qty' ? 'units' : weightDisplayUnit,
+                              prefixIcon: Icon(selectedUnit == 'Qty' ? Icons.numbers : Icons.scale),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          children: [
+                            Text(selectedCut?.toUpperCase() == 'GIZZARD' ? 'G / KG' : 'UNIT', style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                            ToggleButtons(
+                              constraints: const BoxConstraints(minWidth: 40, minHeight: 36),
+                              isSelected: selectedCut?.toUpperCase() == 'GIZZARD'
+                                  ? [weightDisplayUnit == 'kg', weightDisplayUnit == 'g']
+                                  : [selectedUnit == 'kg', selectedUnit == 'Qty'],
+                              onPressed: (index) {
+                                setState(() {
+                                  if (selectedCut?.toUpperCase() == 'GIZZARD') {
+                                    weightDisplayUnit = index == 0 ? 'kg' : 'g';
+                                    selectedUnit = 'kg';
+                                  } else {
+                                    selectedUnit = index == 0 ? 'kg' : 'Qty';
+                                    weightDisplayUnit = 'kg';
+                                  }
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              selectedColor: Colors.white,
+                              fillColor: AppColors.primaryMaroon,
+                              children: selectedCut?.toUpperCase() == 'GIZZARD'
+                                  ? const [
+                                      Text('kg', style: TextStyle(fontSize: 10)),
+                                      Text('g', style: TextStyle(fontSize: 10)),
+                                    ]
+                                  : const [
+                                      Text('kg', style: TextStyle(fontSize: 10)),
+                                      Text('Qty', style: TextStyle(fontSize: 10)),
+                                    ],
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                     const Divider(height: 40),
                     
@@ -690,10 +748,15 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
               TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
               ElevatedButton.icon(
                 onPressed: () async {
-                  final weight = double.tryParse(weightController.text) ?? 0;
+                  double weight = double.tryParse(weightController.text) ?? 0;
                   if (selectedCut == null || weight <= 0) return;
                   if (dispatchTarget == 'BRANCH' && selectedBranchCode == null) return;
                   if (dispatchTarget == 'INDIVIDUAL' && nameController.text.isEmpty) return;
+
+                  // Handle conversion for Gizzard
+                  if (selectedCut?.toUpperCase() == 'GIZZARD' && weightDisplayUnit == 'g') {
+                    weight = weight / 1000;
+                  }
 
                   final now = DateTime.now();
                   final id = UuidUtils.generate();
@@ -705,6 +768,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                     meatType: batch.meatType,
                     batchId: batch.id,
                     weight: weight,
+                    unit: selectedUnit,
                     processedAt: now,
                     branchCode: batch.branchCode,
                   );
@@ -716,6 +780,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                     batchId: batch.id,
                     meatType: '${batch.meatType} - $selectedCut',
                     weight: weight,
+                    unit: selectedUnit,
                     destination: dispatchTarget == 'BRANCH' ? selectedBranchCode! : 'PRIVATE_ORDER',
                     transferTime: now,
                     isIndividual: dispatchTarget == 'INDIVIDUAL',
@@ -869,9 +934,9 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                 // Yield Metrics
                 Row(
                   children: [
-                    Expanded(child: _metricBox('INTAKE', '${batch.weight}kg', Colors.blue)),
+                    Expanded(child: _metricBox('INTAKE', WeightConverter.formatShort(batch.weight, unit: 'kg'), Colors.blue)),
                     const SizedBox(width: 8),
-                    Expanded(child: _metricBox('PACKED', '${totalAccounted.toStringAsFixed(1)}kg', Colors.green)),
+                    Expanded(child: _metricBox('PACKED', WeightConverter.formatShort(totalAccounted, unit: 'kg'), Colors.green)),
                     const SizedBox(width: 8),
                     Expanded(child: _metricBox('YIELD', '${(progress * 100).toStringAsFixed(0)}%', progress > 0.9 ? Colors.green : Colors.orange)),
                   ],
@@ -901,7 +966,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                               const Icon(Icons.check_circle, size: 16, color: Colors.green),
                               const SizedBox(width: 12),
                               Expanded(child: Text(cut.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-                              Text('${cut.weight}kg', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              Text(WeightConverter.formatShort(cut.weight, unit: cut.unit), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                             ],
                           ),
                         );
@@ -918,7 +983,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                         const Icon(Icons.delete_outline, size: 16, color: Colors.orange),
                         const SizedBox(width: 12),
                         const Expanded(child: Text('Operational Waste (Bones/Fat)', style: TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.w500))),
-                        Text('${wastedWeight.toStringAsFixed(1)}kg', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 12)),
+                        Text(WeightConverter.formatShort(wastedWeight, unit: 'kg'), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 12)),
                       ],
                     ),
                   ),
@@ -1052,7 +1117,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                           runSpacing: 4,
                           children: [
                             _miniInfo(Icons.tag, 'BATCH: ${batch.id.substring(0,8)}'),
-                            _miniInfo(Icons.scale, '${batch.weight}kg Total'),
+                            _miniInfo(Icons.scale, '${WeightConverter.formatShort(batch.weight, unit: 'kg')} Total'),
                           ],
                         ),
                         const SizedBox(height: 24),
@@ -1122,7 +1187,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                   cells: [
                     DataCell(Text(cut.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
                     DataCell(Text(cut.batchId.substring(0,8), style: const TextStyle(fontSize: 11, fontFamily: 'monospace'))),
-                    DataCell(Text('${cut.weight} kg', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.green))),
+                    DataCell(Text(WeightConverter.formatShort(cut.weight, unit: cut.unit), style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.green))),
                     DataCell(Text(DateFormat('MMM dd, HH:mm').format(cut.processedAt), style: const TextStyle(fontSize: 11))),
                     DataCell(
                       Row(
@@ -1222,7 +1287,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Move ${log.meatWeight}kg ${log.type.displayName} into active processing?'),
+            Text('Move ${WeightConverter.formatShort(log.meatWeight, unit: 'kg')} ${log.type.displayName} into active processing?'),
             const SizedBox(height: 24),
             TextField(
               controller: controller,
@@ -1253,6 +1318,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     final weightController = TextEditingController();
     MeatBatch? selectedBatch = initialBatch;
     String? selectedCutName;
+    WeightUnit selectedUnit = WeightUnit.kg;
     
     final batchesAsync = ref.read(meatBatchesProvider);
     final activeBatches = batchesAsync.value?.where((b) => 
@@ -1267,9 +1333,13 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
           AnimalType? animalType;
           if (selectedBatch != null) {
             for (var type in AnimalType.values) {
-              if (type.name[0].toUpperCase() + type.name.substring(1) == selectedBatch!.meatType || 
-                  (type == AnimalType.hardChicken && selectedBatch!.meatType == 'Hard Chicken (Layers)') ||
-                  (type == AnimalType.softChicken && selectedBatch!.meatType == 'Soft Chicken (Broilers)')) {
+              final String typeLabel = (type == AnimalType.hardChicken) 
+                  ? 'Hard Chicken (Layers)' 
+                  : (type == AnimalType.softChicken) 
+                      ? 'Soft Chicken (Broilers)' 
+                      : type.name[0].toUpperCase() + type.name.substring(1);
+              
+              if (typeLabel == selectedBatch!.meatType || type.displayName.toUpperCase() == selectedBatch!.meatType.toUpperCase()) {
                 animalType = type;
                 break;
               }
@@ -1303,6 +1373,8 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                       onChanged: (v) => setState(() {
                         selectedBatch = v;
                         selectedCutName = null;
+                        weightController.clear();
+                        selectedUnit = WeightUnit.kg;
                       }),
                       validator: (v) => v == null ? 'Required' : null,
                     ),
@@ -1315,22 +1387,74 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                         value: cut, 
                         child: Text(cut, overflow: TextOverflow.ellipsis)
                       )).toList(),
-                      onChanged: (v) => setState(() => selectedCutName = v),
+                      onChanged: (v) => setState(() {
+                        selectedCutName = v;
+                        if (v != null && animalType != null) {
+                          final String defUnitStr = animalType.defaultUnitFor(v);
+                          selectedUnit = WeightUnit.values.firstWhere((u) => u.name == defUnitStr, orElse: () => WeightUnit.kg);
+                          final defaultVal = animalType.defaultValueFor(v);
+                          if (defaultVal != null) {
+                            weightController.text = defaultVal.toStringAsFixed(0);
+                          } else {
+                            weightController.clear();
+                          }
+                        }
+                      }),
                       validator: (v) => v == null ? 'Required' : null,
                       disabledHint: const Text('Select a batch first'),
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
-                      controller: weightController,
-                      decoration: const InputDecoration(labelText: 'Weight (kg)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.scale)), 
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-                      validator: (v) {
-                        if (v == null || v.isEmpty) return 'Required';
-                        final weight = double.tryParse(v);
-                        if (weight == null || weight <= 0) return 'Invalid weight';
-                        return null;
-                      },
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: weightController,
+                            decoration: InputDecoration(
+                              labelText: selectedUnit == WeightUnit.unit ? 'Quantity' : 'Weight (${selectedUnit.name})', 
+                              border: const OutlineInputBorder(), 
+                              prefixIcon: Icon(selectedUnit == WeightUnit.unit ? Icons.numbers : Icons.scale),
+                              suffixText: selectedUnit.name,
+                            ), 
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                            validator: (v) {
+                              if (v == null || v.isEmpty) return 'Required';
+                              final weight = double.tryParse(v);
+                              if (weight == null || weight <= 0) return 'Invalid value';
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          children: [
+                            const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                            ToggleButtons(
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+                              isSelected: [
+                                selectedUnit == WeightUnit.kg, 
+                                selectedUnit == WeightUnit.g,
+                                selectedUnit == WeightUnit.lb,
+                                selectedUnit == WeightUnit.unit,
+                              ],
+                              onPressed: (index) {
+                                setState(() {
+                                  selectedUnit = WeightUnit.values[index];
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              selectedColor: Colors.white,
+                              fillColor: AppColors.primaryMaroon,
+                              children: const [
+                                Text('kg', style: TextStyle(fontSize: 9)),
+                                Text('g', style: TextStyle(fontSize: 9)),
+                                Text('lb', style: TextStyle(fontSize: 9)),
+                                Text('pcs', style: TextStyle(fontSize: 9)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1342,13 +1466,22 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
                 onPressed: () async {
                   if (formKey.currentState!.validate()) {
                     final String validUuid = UuidUtils.generate();
+                    double weightVal = double.tryParse(weightController.text) ?? 0;
+                    
+                    // Universal Conversion to KG
+                    if (selectedUnit == WeightUnit.g) {
+                      weightVal = WeightConverter.fromG(weightVal);
+                    } else if (selectedUnit == WeightUnit.lb) {
+                      weightVal = WeightConverter.toKg(weightVal);
+                    }
 
                     final cut = MeatCut(
                       id: validUuid,
                       name: selectedCutName!,
                       meatType: selectedBatch!.meatType,
                       batchId: selectedBatch!.id,
-                      weight: double.tryParse(weightController.text) ?? 0,
+                      weight: weightVal,
+                      unit: selectedUnit == WeightUnit.unit ? 'unit' : 'kg',
                       processedAt: DateTime.now(),
                     );
 

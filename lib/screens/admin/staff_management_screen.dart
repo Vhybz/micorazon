@@ -13,6 +13,8 @@ import '../../services/menu_service.dart';
 import '../../models/branch_model.dart';
 import '../../services/branch_provider.dart';
 import '../../widgets/role_pop_scope.dart';
+import '../../services/sms_service.dart';
+import '../../widgets/passcode_guard.dart';
 
 class StaffManagementScreen extends ConsumerStatefulWidget {
   const StaffManagementScreen({super.key});
@@ -63,109 +65,111 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
 
     return RolePopScope(
       currentRoute: currentRoute,
-      child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
-        appBar: const MainAppBar(title: 'Staff Management', showMenuButton: true),
-        drawer: isDesktop
-            ? null
-            : Drawer(
-                child: AppSidebar(
+      child: PasscodeGuard(
+        child: Scaffold(
+          backgroundColor: theme.scaffoldBackgroundColor,
+          appBar: const MainAppBar(title: 'Staff Management', showMenuButton: true),
+          drawer: isDesktop
+              ? null
+              : Drawer(
+                  child: AppSidebar(
+                    userId: user.id,
+                    userName: user.name,
+                    userRole: user.activePrimaryRole.toString().split('.').last.toUpperCase(),
+                    currentRoute: currentRoute,
+                    items: MenuService.getMenuItemsForUser(user),
+                    onTap: (route) => MenuService.navigate(context, route, currentRoute),
+                  ),
+                ),
+          body: Row(
+            children: [
+              if (isDesktop)
+                AppSidebar(
                   userId: user.id,
                   userName: user.name,
-                  userRole: user.activePrimaryRole.name.toUpperCase(),
+                  userRole: user.activePrimaryRole.toString().split('.').last.toUpperCase(),
                   currentRoute: currentRoute,
                   items: MenuService.getMenuItemsForUser(user),
                   onTap: (route) => MenuService.navigate(context, route, currentRoute),
                 ),
-              ),
-        body: Row(
-          children: [
-            if (isDesktop)
-              AppSidebar(
-                userId: user.id,
-                userName: user.name,
-                userRole: user.activePrimaryRole.name.toUpperCase(),
-                currentRoute: currentRoute,
-                items: MenuService.getMenuItemsForUser(user),
-                onTap: (route) => MenuService.navigate(context, route, currentRoute),
-              ),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: () => ref.read(userProvider.notifier).loadUsers(),
-                child: CustomScrollView(
-                  slivers: [
-                    SliverPadding(
-                      padding: const EdgeInsets.all(AppSpacing.l),
-                      sliver: SliverList(
-                        delegate: SliverChildListDelegate([
-                          _buildHeader(context, ref),
-                          const SizedBox(height: AppSpacing.m),
-                          _buildSearchBar(context),
-                          const SizedBox(height: AppSpacing.m),
-                          _buildSummaryInfo(context, users, pendingUsers),
-                          const SizedBox(height: AppSpacing.l),
-                        ]),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () => ref.read(userProvider.notifier).loadUsers(),
+                  child: CustomScrollView(
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.all(AppSpacing.l),
+                        sliver: SliverList(
+                          delegate: SliverChildListDelegate([
+                            _buildHeader(context, ref),
+                            const SizedBox(height: AppSpacing.m),
+                            _buildSearchBar(context),
+                            const SizedBox(height: AppSpacing.m),
+                            _buildSummaryInfo(context, users, pendingUsers),
+                            const SizedBox(height: AppSpacing.l),
+                          ]),
+                        ),
                       ),
-                    ),
 
-                    if (isLoading && users.isEmpty)
-                      const SliverFillRemaining(
-                        child: Center(child: CircularProgressIndicator()),
-                      )
-                    else if (users.isEmpty || (filteredUsers.isEmpty && _searchQuery.isNotEmpty))
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: _buildEmptyState(context, user),
-                      )
-                    else ...[
-                      if (pendingUsers.isNotEmpty) ...[
-                        _buildSectionHeaderSliver('Pending Approvals', theme.colorScheme.secondary),
+                      if (isLoading && users.isEmpty)
+                        const SliverFillRemaining(
+                          child: Center(child: CircularProgressIndicator()),
+                        )
+                      else if (users.isEmpty || (filteredUsers.isEmpty && _searchQuery.isNotEmpty))
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _buildEmptyState(context, user),
+                        )
+                      else ...[
+                        if (pendingUsers.isNotEmpty) ...[
+                          _buildSectionHeaderSliver('Pending Approvals', theme.colorScheme.secondary),
+                          SliverPadding(
+                            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.l),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) => _buildPendingUserCard(
+                                  context, 
+                                  ref, 
+                                  pendingUsers[index], 
+                                  branchesAsync.value ?? [], 
+                                  theme
+                                ),
+                                childCount: pendingUsers.length,
+                              ),
+                            ),
+                          ),
+                        ],
+                        
+                        _buildSectionHeaderSliver('Team Members', theme.colorScheme.onSurface),
                         SliverPadding(
                           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.l),
-                          sliver: SliverList(
+                          sliver: SliverGrid(
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: _getCrossAxisCount(context),
+                              crossAxisSpacing: AppSpacing.m,
+                              mainAxisSpacing: AppSpacing.m,
+                              childAspectRatio: 2.8,
+                            ),
                             delegate: SliverChildBuilderDelegate(
-                              (context, index) => _buildPendingUserCard(
+                              (context, index) => _buildUserCard(
                                 context, 
                                 ref, 
-                                pendingUsers[index], 
+                                approvedUsers[index], 
                                 branchesAsync.value ?? [], 
                                 theme
                               ),
-                              childCount: pendingUsers.length,
+                              childCount: approvedUsers.length,
                             ),
                           ),
                         ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 100)),
                       ],
-                      
-                      _buildSectionHeaderSliver('Team Members', theme.colorScheme.onSurface),
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.l),
-                        sliver: SliverGrid(
-                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: _getCrossAxisCount(context),
-                            crossAxisSpacing: AppSpacing.m,
-                            mainAxisSpacing: AppSpacing.m,
-                            childAspectRatio: 2.8,
-                          ),
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) => _buildUserCard(
-                              context, 
-                              ref, 
-                              approvedUsers[index], 
-                              branchesAsync.value ?? [], 
-                              theme
-                            ),
-                            childCount: approvedUsers.length,
-                          ),
-                        ),
-                      ),
-                      const SliverToBoxAdapter(child: SizedBox(height: 100)),
                     ],
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -286,7 +290,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
                   children: [
                     Text(user.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     const SizedBox(height: 2),
-                    Text('${user.role.name.toUpperCase()} • $branchDisplay',
+                    Text('${user.role.toString().split('.').last.toUpperCase()} • $branchDisplay',
                       style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
                     Text(user.email, style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7))),
                   ],
@@ -558,6 +562,10 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
           value: 'promote',
           child: Row(children: [Icon(Icons.trending_up_rounded, size: 18, color: Colors.purple), const SizedBox(width: 12), Text('Temporary Role')]),
         ),
+        const PopupMenuItem(
+          value: 'passcode',
+          child: Row(children: [Icon(Icons.lock_person_rounded, size: 18, color: AppColors.primaryMaroon), SizedBox(width: 12), Text('Security Passcode')]),
+        ),
         if (isPromoted)
           const PopupMenuItem(
             value: 'clear_promo',
@@ -583,6 +591,7 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
       case 'delete': _confirmDelete(context, ref, user); break;
       case 'manage_roles': _showManageRolesDialog(context, ref, user); break;
       case 'promote': _showPromotionDialog(context, ref, user); break;
+      case 'passcode': _showPasscodeDialog(context, ref, user); break;
       case 'clear_promo': ref.read(userProvider.notifier).clearTemporaryPromotion(user.id); break;
     }
   }
@@ -720,6 +729,104 @@ class _StaffManagementScreenState extends ConsumerState<StaffManagementScreen> {
               },
               style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, foregroundColor: Colors.white),
               child: const Text('Apply Promotion'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPasscodeDialog(BuildContext context, WidgetRef ref, UserAccount user) {
+    final controller = TextEditingController(text: user.passcode);
+    bool isSaving = false;
+    bool sendSms = true;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+          title: Row(
+            children: [
+              const Icon(Icons.lock_person_rounded, color: AppColors.primaryMaroon),
+              const SizedBox(width: 12),
+              Expanded(child: Text('Passcode: ${user.firstName}', overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Set a 4-digit numeric passcode for this staff member. This will be required for sensitive system areas.', 
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 24),
+              TextField(
+                controller: controller,
+                decoration: const InputDecoration(
+                  labelText: 'Security Passcode (4 Digits)',
+                  hintText: 'e.g. 1234',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.password_rounded),
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(4),
+                ],
+                style: const TextStyle(fontSize: 24, letterSpacing: 10, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              CheckboxListTile(
+                title: const Text('Send to staff via SMS', style: TextStyle(fontSize: 13)),
+                value: sendSms,
+                onChanged: (v) => setState(() => sendSms = v!),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                activeColor: AppColors.primaryMaroon,
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: isSaving ? null : () => Navigator.pop(context), child: const Text('CANCEL')),
+            ElevatedButton(
+              onPressed: isSaving ? null : () async {
+                final code = controller.text.trim();
+                if (code.length != 4) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Passcode must be exactly 4 digits.')));
+                  return;
+                }
+
+                setState(() => isSaving = true);
+                try {
+                  await ref.read(userProvider.notifier).updatePasscode(user.id, code);
+                  
+                  if (sendSms && user.phone != null && user.phone!.isNotEmpty) {
+                    // Using SmsService directly from imported file
+                    await SmsService.sendPasscodeSms(user.phone!, user.firstName, code);
+                  }
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Passcode saved ${sendSms ? "and sent via SMS " : ""}for ${user.firstName}.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    setState(() => isSaving = false);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryMaroon, foregroundColor: Colors.white),
+              child: isSaving 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Text('SAVE & SEND'),
             ),
           ],
         ),

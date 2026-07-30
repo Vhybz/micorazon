@@ -58,7 +58,7 @@ class LabelService {
                 pw.Text(transfer.meatType.toUpperCase(), 
                   style: pw.TextStyle(font: boldFont, fontSize: 8),
                   textAlign: pw.TextAlign.center),
-                pw.Text('Weight: ${WeightConverter.formatShort(transfer.weight)}', style: pw.TextStyle(font: font, fontSize: 7)),
+                pw.Text('Weight: ${WeightConverter.formatShort(transfer.weight, unit: transfer.unit)}', style: pw.TextStyle(font: font, fontSize: 7)),
                 pw.SizedBox(height: 1),
                 pw.Container(
                   height: 25,
@@ -163,7 +163,7 @@ class LabelService {
                 children: [
                   pw.Text('MEAT CUT', style: pw.TextStyle(font: boldFont, fontSize: 8)),
                   pw.Text(cut.name.toUpperCase(), style: pw.TextStyle(font: boldFont, fontSize: 10)),
-                  pw.Text('Weight: ${WeightConverter.formatShort(cut.weight)}', style: pw.TextStyle(font: font, fontSize: 8)),
+                  pw.Text('Weight: ${WeightConverter.formatShort(cut.weight, unit: cut.unit)}', style: pw.TextStyle(font: font, fontSize: 8)),
                   pw.SizedBox(height: 2),
                   pw.Container(
                     height: 35,
@@ -238,7 +238,7 @@ class LabelService {
               children: [
                 pw.Text('MEAT BATCH', style: pw.TextStyle(font: boldFont, fontSize: 8)),
                 pw.Text(batch.meatType.toUpperCase(), style: pw.TextStyle(font: boldFont, fontSize: 10)),
-                pw.Text('Weight: ${WeightConverter.formatShort(batch.weight)}', style: pw.TextStyle(font: font, fontSize: 8)),
+                pw.Text('Weight: ${WeightConverter.formatShort(batch.weight, unit: 'kg')}', style: pw.TextStyle(font: font, fontSize: 8)),
                 pw.SizedBox(height: 2),
                 pw.Container(
                   height: 30,

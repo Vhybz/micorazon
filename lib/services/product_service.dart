@@ -105,13 +105,13 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
           _checkStockAlerts(products);
         },
         onError: (e, st) {
-          // If we have cached data, don't show error, just stay on cached data
-          if (state.hasValue) {
-            debugPrint('Product Stream Error (Offline?): Using cached data.');
-          } else {
-            state = AsyncValue.error(e, st);
+          debugPrint('Product Stream Connection Error (Resuming?): $e');
+          // If we already have data, don't trigger error state (avoids red screen)
+          if (!state.hasValue) {
+             state = AsyncValue.error(e, st);
           }
         },
+        cancelOnError: false,
       );
     } else {
       state = const AsyncValue.data([]);
@@ -459,6 +459,34 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         }).toList());
       } catch (e) {
         debugPrint('Remove Promotion Error: $e');
+      }
+    });
+  }
+
+  Future<void> setUnlimitedStatus(bool isUnlimited, {List<String>? selectedIds}) async {
+    state.whenData((products) async {
+      final productsToUpdate = selectedIds == null 
+          ? products 
+          : products.where((p) => selectedIds.contains(p.id)).toList();
+      
+      try {
+        for (var p in productsToUpdate) {
+          final updatedProduct = p.copyWith(isUnlimited: isUnlimited);
+          
+          await OfflineSyncService.addToQueue(
+            actionType: 'UPDATE_PRODUCT',
+            data: updatedProduct.toJson(),
+          );
+        }
+        
+        state = AsyncValue.data(products.map((p) {
+          if (selectedIds == null || selectedIds.contains(p.id)) {
+            return p.copyWith(isUnlimited: isUnlimited);
+          }
+          return p;
+        }).toList());
+      } catch (e) {
+        debugPrint('Set Unlimited Status Error: $e');
       }
     });
   }

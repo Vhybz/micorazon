@@ -30,8 +30,10 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
   final _sourceNameController = TextEditingController();
   final _sourceLocationController = TextEditingController();
   final _ownerController = TextEditingController();
+  final _quantityController = TextEditingController(text: '1');
 
   AnimalType? _selectedType;
+  ChickenRange? _selectedRange;
   bool _isChicken = false;
   bool _isHard = true;
   bool _isSubmitting = false;
@@ -50,6 +52,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
     // Add listeners to calculate loss and yield in real-time
     _liveWeightController.addListener(_calculateMetrics);
     _meatWeightController.addListener(_calculateMetrics);
+    _quantityController.addListener(_updateChickenEstimates);
   }
 
   void _calculateMetrics() {
@@ -66,10 +69,44 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
     });
   }
 
+  void _updateChickenEstimates() {
+    if (!_isChicken || _selectedRange == null) return;
+    
+    final int qty = int.tryParse(_quantityController.text) ?? 0;
+    if (qty <= 0) return;
+
+    // 1. Calculate Price
+    final double totalPrice = qty * _selectedRange!.price;
+    _priceController.text = totalPrice.toStringAsFixed(0);
+
+    // 2. Estimate Weight (Average of range in LB, converted to KG)
+    final double avgWeightLb = _selectedRange!.averageWeight;
+    final double totalWeightLb = qty * avgWeightLb;
+    
+    // We update the controller. If user is in KG mode, we convert.
+    if (_liveWeightUnit == WeightUnit.kg) {
+      _liveWeightController.text = (totalWeightLb * 0.453592).toStringAsFixed(1);
+    } else {
+      _liveWeightController.text = totalWeightLb.toStringAsFixed(1);
+    }
+
+    // Meat weight estimate based on dressing percentage
+    final double dressing = _selectedType?.dressingPercentage ?? 0.7;
+    final double liveKg = _liveWeightUnit == WeightUnit.kg ? (double.tryParse(_liveWeightController.text) ?? 0) : WeightConverter.toKg(double.tryParse(_liveWeightController.text) ?? 0);
+    
+    if (_meatWeightUnit == WeightUnit.kg) {
+      _meatWeightController.text = (liveKg * dressing).toStringAsFixed(1);
+    } else {
+      _meatWeightController.text = (WeightConverter.toLbs(liveKg) * dressing).toStringAsFixed(1);
+    }
+  }
+
   @override
   void dispose() {
     _liveWeightController.removeListener(_calculateMetrics);
     _meatWeightController.removeListener(_calculateMetrics);
+    _quantityController.removeListener(_updateChickenEstimates);
+    _quantityController.dispose();
     super.dispose();
   }
 
@@ -106,8 +143,10 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
               } else {
                 _isChicken = false;
                 _selectedType = v as AnimalType;
+                _selectedRange = null;
               }
               _tagNumberController.text = _generateTagID();
+              _updateChickenEstimates();
             });
           },
           validator: (v) => v == null ? 'Required' : null,
@@ -115,37 +154,80 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
         if (_isChicken) ...[
           const SizedBox(height: AppSpacing.m),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.all(AppSpacing.m),
             decoration: BoxDecoration(
               color: AppColors.surfaceWhite,
               borderRadius: BorderRadius.circular(AppRadius.s),
               border: Border.all(color: AppColors.borderGray),
             ),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Chicken Category:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                ChoiceChip(
-                  label: const Text('Hard (Layers)', style: TextStyle(fontSize: 11)),
-                  selected: _isHard,
-                  onSelected: (val) {
-                    setState(() {
-                      _isHard = val;
-                      _selectedType = val ? AnimalType.hardChicken : AnimalType.softChicken;
-                    });
-                  },
+                const Text('Chicken Batch Configuration:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Center(child: Text('Broilers (SOFT)', style: TextStyle(fontSize: 11))),
+                        selected: _selectedType == AnimalType.softChicken,
+                        onSelected: (val) {
+                          setState(() {
+                            _isHard = false;
+                            _selectedType = AnimalType.softChicken;
+                            _selectedRange = null;
+                            _updateChickenEstimates();
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Center(child: Text('Layers (HARD)', style: TextStyle(fontSize: 11))),
+                        selected: _selectedType == AnimalType.hardChicken,
+                        onSelected: (val) {
+                          setState(() {
+                            _isHard = true;
+                            _selectedType = AnimalType.hardChicken;
+                            _selectedRange = null;
+                            _updateChickenEstimates();
+                          });
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                ChoiceChip(
-                  label: const Text('Soft (Broilers)', style: TextStyle(fontSize: 11)),
-                  selected: !_isHard,
-                  onSelected: (val) {
-                    setState(() {
-                      _isHard = !val;
-                      _selectedType = val ? AnimalType.softChicken : AnimalType.hardChicken;
-                    });
-                  },
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<ChickenRange>(
+                        initialValue: _selectedRange,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Weight Range (LB)', border: OutlineInputBorder(), isDense: true),
+                        items: _selectedType?.chickenRanges.map((r) => DropdownMenuItem(value: r, child: Text(r.label))).toList() ?? [],
+                        onChanged: (v) {
+                          setState(() {
+                            _selectedRange = v;
+                            _updateChickenEstimates();
+                          });
+                        },
+                        validator: (v) => (_isChicken && v == null) ? 'Required' : null,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _quantityController,
+                        decoration: const InputDecoration(labelText: 'Quantity', border: OutlineInputBorder(), isDense: true, suffixText: 'birds'),
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        validator: (v) => (_isChicken && (int.tryParse(v ?? '') ?? 0) <= 0) ? 'Invalid' : null,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -185,7 +267,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
         const SizedBox(width: 8),
         DropdownButton<WeightUnit>(
           value: _liveWeightUnit,
-          items: WeightUnit.values.where((u) => u != WeightUnit.unit).map((u) => DropdownMenuItem(value: u, child: Text(u.name.toUpperCase()))).toList(),
+          items: [WeightUnit.kg, WeightUnit.lb, WeightUnit.g].map((u) => DropdownMenuItem(value: u, child: Text(u.name.toUpperCase()))).toList(),
           onChanged: (v) {
             setState(() {
               _liveWeightUnit = v!;
@@ -219,7 +301,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
         const SizedBox(width: 8),
         DropdownButton<WeightUnit>(
           value: _meatWeightUnit,
-          items: WeightUnit.values.where((u) => u != WeightUnit.unit).map((u) => DropdownMenuItem(value: u, child: Text(u.name.toUpperCase()))).toList(),
+          items: [WeightUnit.kg, WeightUnit.lb, WeightUnit.g].map((u) => DropdownMenuItem(value: u, child: Text(u.name.toUpperCase()))).toList(),
           onChanged: (v) {
             setState(() {
               _meatWeightUnit = v!;
@@ -524,6 +606,8 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
         final tagNumber = _tagNumberController.text;
         final manualFarmTag = _manualFarmTagController.text.isNotEmpty ? _manualFarmTagController.text : null;
         final type = _selectedType!;
+        final int quantity = _isChicken ? (int.tryParse(_quantityController.text) ?? 1) : 1;
+
         final double liveWeight = _liveWeightUnit == WeightUnit.kg 
             ? (double.tryParse(_liveWeightController.text) ?? 0) 
             : WeightConverter.toKg(double.tryParse(_liveWeightController.text) ?? 0);
@@ -547,6 +631,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
           tagNumber: _tagNumberController.text,
           manualFarmTag: manualFarmTag,
           type: type,
+          quantity: quantity,
           liveWeight: liveWeight,
           meatWeight: meatWeight, // This acts as the estimated meat weight from intake
           price: price,
@@ -562,6 +647,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
           tagNumber: tagNumber,
           manualFarmTag: manualFarmTag,
           type: type,
+          quantity: quantity,
           weight: liveWeight,
           price: price,
           farmPrice: farmPrice,
@@ -651,10 +737,13 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
   void _resetForm() {
     _formKey.currentState!.reset();
     _liveWeightController.clear();
+    _meatWeightController.clear();
     _priceController.clear();
     _sourceNameController.clear();
     _sourceLocationController.clear();
     _ownerController.clear();
+    _quantityController.text = '1';
+    _selectedRange = null;
     _tagNumberController.text = _generateTagID();
   }
 

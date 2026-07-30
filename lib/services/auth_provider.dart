@@ -11,6 +11,7 @@ import 'transfer_provider.dart';
 import 'butcher_service.dart';
 import 'notification_service.dart';
 import 'cart_provider.dart';
+import 'audit_service.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService();
@@ -20,6 +21,13 @@ class GlobalLogout {
   /// Primary logout method for UI components (Screens/Widgets)
   static Future<void> perform(WidgetRef ref) async {
     try {
+      // 0. Log Audit Event before clearing session
+      await AuditService.log(
+        ref: ref,
+        action: 'USER_SIGNED_OUT',
+        entityType: 'USER',
+      );
+
       // 1. Sign out from Supabase
       await ref.read(authServiceProvider).signOut();
 
@@ -39,6 +47,13 @@ class GlobalLogout {
   /// Use this version inside other Providers or Notifiers where you have Ref
   static Future<void> performFromProvider(Ref ref) async {
     try {
+      // 0. Log Audit Event before clearing session
+      await AuditService.log(
+        ref: ref,
+        action: 'USER_SIGNED_OUT',
+        entityType: 'USER',
+      );
+
       await ref.read(authServiceProvider).signOut();
 
       ref.read(currentUserIdProvider.notifier).state = null;

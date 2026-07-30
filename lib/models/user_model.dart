@@ -1,4 +1,9 @@
 enum UserRole { superAdmin, admin, butcher, cashier }
+
+extension UserRoleExtension on UserRole {
+  String get display => toString().split('.').last;
+}
+
 enum AccountStatus { pending, approved, suspended }
 
 class UserAccount {
@@ -33,6 +38,8 @@ class UserAccount {
   final int? salaryDay; // Day of the month (1-31)
   final DateTime? lastSalaryDate;
   final bool lastPaymentWasAdvance;
+  final String? passcode; // 4-digit security code
+  final DateTime? passcodeSentAt; // When the code was last sent
 
   // Theme preferences
   final String? themeMode; // 'light', 'dark', 'system'
@@ -51,21 +58,21 @@ class UserAccount {
     this.branchCode,
     this.secondaryRoles = const [],
     this.shopLocation,
-    this.status = AccountStatus.pending, // Default to pending for all new accounts
+    this.status = AccountStatus.pending,
     DateTime? createdAt,
     this.isDeleted = false,
     this.lastSeen,
     this.temporaryRole,
     this.tempRoleStart,
     this.tempRoleEnd,
-    this.enabledPermissions = const {
-      '/settings' // Everyone gets settings by default
-    },
+    this.enabledPermissions = const {'/settings'},
     this.newlyAddedPermissions = const {},
     this.salaryAmount,
     this.salaryDay,
     this.lastSalaryDate,
     this.lastPaymentWasAdvance = false,
+    this.passcode,
+    this.passcodeSentAt,
     this.themeMode,
     this.themePrimaryColor,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -121,9 +128,7 @@ class UserAccount {
       createdAt: safeDate(json['created_at']) ?? DateTime.now(),
       isDeleted: json['is_deleted'] == true,
       lastSeen: safeDate(json['last_seen']),
-      temporaryRole: json['temporary_role'] != null 
-          ? safeRole(json['temporary_role']?.toString()) 
-          : null,
+      temporaryRole: json['temporary_role'] != null ? safeRole(json['temporary_role']?.toString()) : null,
       tempRoleStart: safeDate(json['temp_role_start']),
       tempRoleEnd: safeDate(json['temp_role_end']),
       enabledPermissions: Set<String>.from((json['enabled_permissions'] as List? ?? []).map((e) => e.toString())),
@@ -132,6 +137,8 @@ class UserAccount {
       salaryDay: json['salary_day'] != null ? int.tryParse(json['salary_day'].toString()) : null,
       lastSalaryDate: safeDate(json['last_salary_date']),
       lastPaymentWasAdvance: json['last_payment_was_advance'] == true,
+      passcode: json['passcode']?.toString(),
+      passcodeSentAt: safeDate(json['passcode_sent_at']),
       themeMode: json['theme_mode']?.toString(),
       themePrimaryColor: json['theme_primary_color'] != null ? int.tryParse(json['theme_primary_color'].toString()) : null,
     );
@@ -147,15 +154,15 @@ class UserAccount {
       'gender': gender,
       'dob': dob?.toIso8601String(),
       'photo_url': photoUrl,
-      'role': role.name,
+      'role': role.toString().split('.').last,
       'branch_code': branchCode,
-      'secondary_roles': secondaryRoles.map((e) => e.name).toList(),
+      'secondary_roles': secondaryRoles.map((e) => e.toString().split('.').last).toList(),
       'shop_location': shopLocation,
-      'status': status.name,
+      'status': status.toString().split('.').last,
       'created_at': createdAt.toIso8601String(),
       'is_deleted': isDeleted,
       'last_seen': lastSeen?.toIso8601String(),
-      'temporary_role': temporaryRole?.name,
+      'temporary_role': temporaryRole?.toString().split('.').last,
       'temp_role_start': tempRoleStart?.toIso8601String(),
       'temp_role_end': tempRoleEnd?.toIso8601String(),
       'enabled_permissions': enabledPermissions.toList(),
@@ -164,6 +171,8 @@ class UserAccount {
       'salary_day': salaryDay,
       'last_salary_date': lastSalaryDate != null ? "${lastSalaryDate!.year}-${lastSalaryDate!.month.toString().padLeft(2, '0')}-${lastSalaryDate!.day.toString().padLeft(2, '0')}" : null,
       'last_payment_was_advance': lastPaymentWasAdvance,
+      'passcode': passcode,
+      'passcode_sent_at': passcodeSentAt?.toIso8601String(),
       'theme_mode': themeMode,
       'theme_primary_color': themePrimaryColor,
     };
@@ -173,11 +182,9 @@ class UserAccount {
 
   bool get isOnline {
     if (lastSeen == null) return false;
-    // Consider online if active within last 2 minutes
     return DateTime.now().difference(lastSeen!).inMinutes < 2;
   }
 
-  /// Returns the current active primary role (temporary role if within valid period, else permanent role)
   UserRole get activePrimaryRole {
     if (temporaryRole != null && tempRoleStart != null && tempRoleEnd != null) {
       final now = DateTime.now();
@@ -188,10 +195,8 @@ class UserAccount {
     return role;
   }
 
-  /// Alias for activePrimaryRole for compatibility
   UserRole get activeRole => activePrimaryRole;
 
-  /// Returns all roles currently active for the user
   Set<UserRole> get activeRoles {
     final roles = {role, ...secondaryRoles};
     if (hasActivePromotion) {
@@ -230,6 +235,8 @@ class UserAccount {
     int? salaryDay,
     DateTime? lastSalaryDate,
     bool? lastPaymentWasAdvance,
+    String? passcode,
+    DateTime? passcodeSentAt,
     String? themeMode,
     int? themePrimaryColor,
     bool clearPromotion = false,
@@ -260,6 +267,8 @@ class UserAccount {
       salaryDay: salaryDay ?? this.salaryDay,
       lastSalaryDate: lastSalaryDate ?? this.lastSalaryDate,
       lastPaymentWasAdvance: lastPaymentWasAdvance ?? this.lastPaymentWasAdvance,
+      passcode: passcode ?? this.passcode,
+      passcodeSentAt: passcodeSentAt ?? this.passcodeSentAt,
       themeMode: themeMode ?? this.themeMode,
       themePrimaryColor: themePrimaryColor ?? this.themePrimaryColor,
     );

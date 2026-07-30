@@ -288,7 +288,7 @@ class _StockVerificationScreenState extends ConsumerState<StockVerificationScree
                                                 color: theme.colorScheme.primary.withValues(alpha: 0.1),
                                                 borderRadius: BorderRadius.circular(6),
                                               ),
-                                              child: Text(WeightConverter.formatShort(t.weight), 
+                                              child: Text(WeightConverter.formatShort(t.weight, unit: t.unit), 
                                                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: theme.colorScheme.primary)
                                               ),
                                             ),

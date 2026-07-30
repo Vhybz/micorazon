@@ -5,17 +5,31 @@ import '../models/sale_model.dart';
 import '../models/user_model.dart';
 
 class SmsService {
-  static String get _apiKey => const String.fromEnvironment('ARKESEL_API_KEY', defaultValue: '')
-      .isEmpty ? (dotenv.env['ARKESEL_API_KEY'] ?? 'akhlSEFORkpBSHBNR1JQTk1Lbm4') : const String.fromEnvironment('ARKESEL_API_KEY');
-  
-  static String get _senderId => const String.fromEnvironment('ARKESEL_SENDER_ID', defaultValue: '')
-      .isEmpty ? (dotenv.env['ARKESEL_SENDER_ID'] ?? 'MiCorazon') : const String.fromEnvironment('ARKESEL_SENDER_ID');
+  // Use const for better Web support with --dart-define
+  static const String _defineApiKey = String.fromEnvironment('ARKESEL_API_KEY');
+  static const String _defineSenderId = String.fromEnvironment('ARKESEL_SENDER_ID');
+  static const String _defineAdminPhone = String.fromEnvironment('ADMIN_PHONE');
 
-  static String get _adminPhone => const String.fromEnvironment('ADMIN_PHONE', defaultValue: '')
-      .isEmpty ? (dotenv.env['ADMIN_PHONE'] ?? '0209276200') : const String.fromEnvironment('ADMIN_PHONE');
+  static String get _apiKey {
+    if (_defineApiKey.isNotEmpty) return _defineApiKey;
+    return dotenv.env['ARKESEL_API_KEY'] ?? 'akhlSEFORkpBSHBNR1JQTk1Lbm4';
+  }
+  
+  static String get _senderId {
+    if (_defineSenderId.isNotEmpty) return _defineSenderId;
+    return dotenv.env['ARKESEL_SENDER_ID'] ?? 'MiCorazon';
+  }
+
+  static String get _adminPhone {
+    if (_defineAdminPhone.isNotEmpty) return _defineAdminPhone;
+    return dotenv.env['ADMIN_PHONE'] ?? '0209276200';
+  }
 
   static Future<bool> _sendSms(String to, String message) async {
-    if (_apiKey.isEmpty) {
+    final apiKey = _apiKey.trim();
+    final senderId = _senderId.trim();
+
+    if (apiKey.isEmpty) {
       debugPrint('SMS Error: API Key is missing');
       return false;
     }
@@ -37,17 +51,18 @@ class SmsService {
       final response = await http.post(
         v2Url,
         headers: {
-          'api-key': _apiKey,
+          'api-key': apiKey,
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
-        body: '{"sender":"$_senderId","recipients":["$formattedPhone"],"message":"${message.replaceAll('"', '\\"')}"}',
+        body: '{"sender":"$senderId","recipients":["$formattedPhone"],"message":"${message.replaceAll('"', '\\"')}"}',
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         debugPrint('SMS sent successfully via V2: ${response.body}');
         return true;
       } else {
-        debugPrint('Arkesel V2 failed (Status ${response.statusCode}). Falling back to V1...');
+        debugPrint('Arkesel V2 failed (Status ${response.statusCode}): ${response.body}. Falling back to V1...');
       }
     } catch (e) {
       debugPrint('Arkesel V2 Exception: $e. Trying V1...');
@@ -56,9 +71,9 @@ class SmsService {
     // Fallback to Arkesel V1 (Query Params)
     final url = Uri.parse(
       'https://sms.arkesel.com/sms/api?action=send-sms'
-      '&api_key=$_apiKey'
+      '&api_key=$apiKey'
       '&to=$formattedPhone'
-      '&from=$_senderId'
+      '&from=$senderId'
       '&sms=${Uri.encodeComponent(message)}'
     );
 
@@ -78,8 +93,9 @@ class SmsService {
     }
   }
 
-  static Future<bool> sendReceiptSms(SaleRecord sale, {double? discountAmount, String? branchName}) async {
-    if (sale.customerPhone == null || sale.customerPhone!.isEmpty) return false;
+  static Future<bool> sendReceiptSms(SaleRecord sale, {double? discountAmount, String? branchName, String? customPhone}) async {
+    final String? targetPhone = customPhone ?? sale.customerPhone;
+    if (targetPhone == null || targetPhone.isEmpty) return false;
     
     final bool isDebt = sale.balance > 0.01;
     final String typeHeader = isDebt ? 'DEBT INVOICE: ' : 'ORDER CONFIRMATION: ';
@@ -99,7 +115,7 @@ class SmsService {
       }
     }
 
-    return await _sendSms(sale.customerPhone!, message);
+    return await _sendSms(targetPhone, message);
   }
 
   static Future<void> sendApprovalRequestSms(UserAccount applicant, List<UserAccount> admins) async {
@@ -218,10 +234,17 @@ class SmsService {
     required String firstName,
     required double amount,
     required bool isAdvance,
+    String? note,
   }) async {
     if (phone.isEmpty) return false;
+    final String typeHeader = isAdvance ? 'ADVANCE PAYMENT ALERT: ' : 'SALARY PAYMENT CONFIRMATION: ';
     final String type = isAdvance ? 'an advance' : 'your salary payment';
-    return await _sendSms(phone, 'Hello $firstName, you have received $type of GHS ${amount.toStringAsFixed(2)}. - Mi~Corazon Management');
+    String message = '${typeHeader}Hello $firstName, you have received $type of GHS ${amount.toStringAsFixed(2)}.';
+    if (note != null && note.isNotEmpty) {
+      message += ' Note: $note';
+    }
+    message += ' - Mi~Corazon Management';
+    return await _sendSms(phone, message);
   }
 
   static Future<bool> sendCustomSms(String phone, String message) async {
@@ -232,6 +255,12 @@ class SmsService {
   static Future<bool> sendVerificationCodeSms(String phone, String code) async {
     if (phone.isEmpty) return false;
     final String message = 'Your Mi~Corazon password reset code is: $code. Valid for 5 minutes.';
+    return await _sendSms(phone, message);
+  }
+
+  static Future<bool> sendPasscodeSms(String phone, String name, String passcode) async {
+    if (phone.isEmpty) return false;
+    final String message = 'Hello $name, your new Mi~Corazon security passcode is: $passcode. Use this to access sensitive system areas.';
     return await _sendSms(phone, message);
   }
 }

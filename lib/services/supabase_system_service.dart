@@ -16,6 +16,15 @@ class SupabaseSystemService {
     return (response as List).map((e) => AuditLog.fromJson(e)).toList();
   }
 
+  Future<List<AuditLog>> getGlobalAuditLogs() async {
+    final response = await _client
+        .from('audit_logs')
+        .select()
+        .order('timestamp', ascending: false)
+        .limit(100);
+    return (response as List).map((e) => AuditLog.fromJson(e)).toList();
+  }
+
   Future<List<SystemNotification>> getNotifications(String branchCode, String? userId) async {
     // Fetch notifications for the branch and specific user (or null)
     final query = _client

@@ -7,6 +7,7 @@ class ProductCard extends StatelessWidget {
   final String price;
   final String? originalPrice;
   final double? stockQuantity;
+  final bool isUnlimited;
   final double? lowStockThreshold;
   final String? unit;
   final String imageUrl;
@@ -21,6 +22,7 @@ class ProductCard extends StatelessWidget {
     required this.price,
     this.originalPrice,
     this.stockQuantity,
+    this.isUnlimited = false,
     this.lowStockThreshold,
     this.unit,
     this.promoLabel,
@@ -36,6 +38,33 @@ class ProductCard extends StatelessWidget {
     );
   }
 
+  Widget _buildFormattedName(String name, TextStyle baseStyle) {
+    if (!name.contains('(')) {
+      return Text(name, style: baseStyle, maxLines: 2, overflow: TextOverflow.ellipsis);
+    }
+
+    final int splitIndex = name.lastIndexOf('(');
+    final String mainName = name.substring(0, splitIndex).trim();
+    final String range = name.substring(splitIndex).trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(mainName, style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+        Text(range, 
+          style: baseStyle.copyWith(
+            fontSize: baseStyle.fontSize! - 2, 
+            color: baseStyle.color?.withValues(alpha: 0.7) ?? Colors.black54,
+            fontWeight: FontWeight.normal,
+          ), 
+          maxLines: 1, 
+          overflow: TextOverflow.ellipsis
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -43,7 +72,7 @@ class ProductCard extends StatelessWidget {
 
     BorderSide borderSide = isDark ? BorderSide(color: theme.dividerColor) : BorderSide.none;
     
-    if (stockQuantity != null) {
+    if (!isUnlimited && stockQuantity != null) {
       if (stockQuantity! <= 0) {
         borderSide = const BorderSide(color: Colors.red, width: 2);
       } else if (stockQuantity! <= (lowStockThreshold ?? 5.0)) {
@@ -122,11 +151,11 @@ class ProductCard extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: (stockQuantity! > 0 ? Colors.green : Colors.red).withValues(alpha: 0.9),
+                          color: (isUnlimited ? Colors.blue : (stockQuantity! > 0 ? Colors.green : Colors.red)).withValues(alpha: 0.9),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          '${stockQuantity!.toStringAsFixed(1)}${unit ?? "kg"}',
+                          isUnlimited ? 'UNLIMITED' : '${stockQuantity!.toStringAsFixed(1)}${unit ?? "kg"}',
                           style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -166,24 +195,19 @@ class ProductCard extends StatelessWidget {
                 children: [
                   Text(
                     category.toUpperCase(),
-                    style: TextStyle(
-                      color: isDark ? theme.colorScheme.primary : AppColors.primaryMaroon,
-                      fontSize: 8,
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontSize: 13,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.5,
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    name,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold, 
-                      fontSize: 13,
-                      color: theme.colorScheme.onSurface,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  _buildFormattedName(name, TextStyle(
+                    fontWeight: FontWeight.bold, 
+                    fontSize: 13,
+                    color: theme.colorScheme.onSurface,
+                  )),
                   const SizedBox(height: 4),
                   FittedBox(
                     fit: BoxFit.scaleDown,

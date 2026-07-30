@@ -11,6 +11,7 @@ import '../../services/user_provider.dart';
 import '../../models/user_model.dart';
 import '../../widgets/role_pop_scope.dart';
 import '../../services/birthday_service.dart';
+import '../../widgets/passcode_guard.dart';
 import 'butcher_dashboard.dart';
 import 'animal_intake_screen.dart';
 import 'slaughter_log_screen.dart';
@@ -69,34 +70,36 @@ class ButcherShell extends ConsumerWidget {
             ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.dashboard);
           }
         },
-        child: Scaffold(
-          backgroundColor: theme.scaffoldBackgroundColor,
-          appBar: MainAppBar(
-            title: _getScreenTitle(currentScreen),
-            onProfileTap: () => ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.profile),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.report_gmailerrorred_rounded, color: Colors.orange),
-                tooltip: 'Report Issue to Admin',
-                onPressed: () => _showButcherReportDialog(context, ref),
-              ),
-            ],
-          ),
-          drawer: isDesktop ? null : Drawer(child: _buildSidebar(ref, currentScreen, user, context, menuItems)),
-          body: Row(
-            children: [
-              if (isDesktop) _buildSidebar(ref, currentScreen, user, context, menuItems),
-              Expanded(
-                child: Container(
-                  color: theme.scaffoldBackgroundColor,
-                  child: SafeArea(
-                    top: false,
-                    bottom: true,
-                    child: _buildContent(currentScreen),
+        child: PasscodeGuard(
+          child: Scaffold(
+            backgroundColor: theme.scaffoldBackgroundColor,
+            appBar: MainAppBar(
+              title: _getScreenTitle(currentScreen),
+              onProfileTap: () => ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.profile),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.report_gmailerrorred_rounded, color: Colors.orange),
+                  tooltip: 'Report Issue to Admin',
+                  onPressed: () => _showButcherReportDialog(context, ref),
+                ),
+              ],
+            ),
+            drawer: isDesktop ? null : Drawer(child: _buildSidebar(ref, currentScreen, user, context, menuItems)),
+            body: Row(
+              children: [
+                if (isDesktop) _buildSidebar(ref, currentScreen, user, context, menuItems),
+                Expanded(
+                  child: Container(
+                    color: theme.scaffoldBackgroundColor,
+                    child: SafeArea(
+                      top: false,
+                      bottom: true,
+                      child: _buildContent(currentScreen),
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

@@ -335,7 +335,7 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
   }
 
   Widget _buildTrendChart(List<SaleRecord> sales) {
-    final activeSales = sales.where((s) => s.status != SaleStatus.cancelled).toList();
+    final activeSales = sales.where((s) => s.isActive).toList();
     if (activeSales.isEmpty) return const Center(child: Text('No debt data for trend', style: TextStyle(color: Colors.white54)));
 
     // Group debt by day for the last 7 days

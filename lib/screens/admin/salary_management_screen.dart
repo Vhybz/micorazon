@@ -15,6 +15,7 @@ import '../../services/salary_provider.dart';
 import '../../models/salary_model.dart';
 import '../../core/uuid_utils.dart';
 import '../../widgets/role_pop_scope.dart';
+import '../../widgets/passcode_guard.dart';
 
 class SalaryManagementScreen extends ConsumerWidget {
   const SalaryManagementScreen({super.key});
@@ -50,79 +51,81 @@ class SalaryManagementScreen extends ConsumerWidget {
 
     return RolePopScope(
       currentRoute: currentRoute,
-      child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
-        appBar: const MainAppBar(title: 'Payroll & Salaries', showMenuButton: true),
-        drawer: isDesktop ? null : Drawer(
-          child: AppSidebar(
-            userId: user.id,
-            userName: user.name,
-            userRole: user.activePrimaryRole.name.toUpperCase(),
-            currentRoute: currentRoute,
-            items: MenuService.getMenuItemsForUser(user),
-            onTap: (route) => MenuService.navigate(context, route, currentRoute),
+      child: PasscodeGuard(
+        child: Scaffold(
+          backgroundColor: theme.scaffoldBackgroundColor,
+          appBar: const MainAppBar(title: 'Payroll & Salaries', showMenuButton: true),
+          drawer: isDesktop ? null : Drawer(
+            child: AppSidebar(
+              userId: user.id,
+              userName: user.name,
+              userRole: user.activePrimaryRole.name.toUpperCase(),
+              currentRoute: currentRoute,
+              items: MenuService.getMenuItemsForUser(user),
+              onTap: (route) => MenuService.navigate(context, route, currentRoute),
+            ),
           ),
-        ),
-        body: Row(
-          children: [
-            if (isDesktop)
-              AppSidebar(
-                userId: user.id,
-                userName: user.name,
-                userRole: user.activePrimaryRole.name.toUpperCase(),
-                currentRoute: currentRoute,
-                items: MenuService.getMenuItemsForUser(user),
-                onTap: (route) => MenuService.navigate(context, route, currentRoute),
-              ),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.l),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (dueSoon.isNotEmpty) ...[
-                      _buildAlertBanner(theme, dueSoon),
-                      const SizedBox(height: AppSpacing.l),
-                    ],
-                    _buildHeader(theme, users.length),
-                    const SizedBox(height: AppSpacing.m),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () => ReceiptService.printSalaryReport(users),
-                          icon: const Icon(Icons.print_rounded, size: 18),
-                          label: const Text('Print Payroll List'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: theme.colorScheme.primary,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Syncing payment history...'), duration: Duration(seconds: 1)));
-                            await ref.read(userProvider.notifier).loadUsers();
-                            await ref.read(salaryHistoryProvider.notifier).loadAll();
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('History synced with database.'), backgroundColor: Colors.green));
-                            }
-                          },
-                          icon: const Icon(Icons.refresh_rounded, size: 18),
-                          label: const Text('Sync Staff Data'),
-                        ),
+          body: Row(
+            children: [
+              if (isDesktop)
+                AppSidebar(
+                  userId: user.id,
+                  userName: user.name,
+                  userRole: user.activePrimaryRole.name.toUpperCase(),
+                  currentRoute: currentRoute,
+                  items: MenuService.getMenuItemsForUser(user),
+                  onTap: (route) => MenuService.navigate(context, route, currentRoute),
+                ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppSpacing.l),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (dueSoon.isNotEmpty) ...[
+                        _buildAlertBanner(theme, dueSoon),
+                        const SizedBox(height: AppSpacing.l),
                       ],
-                    ),
-                    const SizedBox(height: AppSpacing.xl),
-                    if (users.isEmpty)
-                      _buildEmptyState(theme)
-                    else
-                      _buildPaymentGrid(context, ref, users),
-                  ],
+                      _buildHeader(theme, users.length),
+                      const SizedBox(height: AppSpacing.m),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () => ReceiptService.printSalaryReport(users),
+                            icon: const Icon(Icons.print_rounded, size: 18),
+                            label: const Text('Print Payroll List'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: theme.colorScheme.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Syncing payment history...'), duration: Duration(seconds: 1)));
+                              await ref.read(userProvider.notifier).loadUsers();
+                              await ref.read(salaryHistoryProvider.notifier).loadAll();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('History synced with database.'), backgroundColor: Colors.green));
+                              }
+                            },
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('Sync Staff Data'),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.xl),
+                      if (users.isEmpty)
+                        _buildEmptyState(theme)
+                      else
+                        _buildPaymentGrid(context, ref, users),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -200,12 +203,11 @@ class SalaryManagementScreen extends ConsumerWidget {
             crossAxisCount: crossAxisCount,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
-            childAspectRatio: constraints.maxWidth < 600 ? 0.95 : 1.5, // Even taller for mobile
+            childAspectRatio: constraints.maxWidth < 600 ? 0.95 : 1.5,
           ),
           itemCount: staffList.length,
           itemBuilder: (context, index) {
             final staff = staffList[index];
-            // Ensure cards take minimum needed space
             return IntrinsicHeight(
               child: _buildSalaryCard(context, ref, staff),
             );
@@ -241,15 +243,15 @@ class SalaryManagementScreen extends ConsumerWidget {
           : BorderSide(color: theme.dividerColor),
       ),
       child: Container(
-        padding: const EdgeInsets.all(12), // Reduced from 16
+        padding: const EdgeInsets.all(12),
         child: Column(
-          mainAxisSize: MainAxisSize.min, // Changed from default
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Container(
-                  width: 36, // Reduced from 40
+                  width: 36,
                   height: 36,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
@@ -265,7 +267,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                         : _fallbackAvatar(staff, theme),
                   ),
                 ),
-                const SizedBox(width: 8), // Reduced from 12
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -286,7 +288,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                 ),
               ],
             ),
-            const Divider(height: 16), // Reduced from 24
+            const Divider(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -308,7 +310,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 8), // Reduced from 12
+            const SizedBox(height: 8),
             Row(
               children: [
                 _salaryActionButton(
@@ -317,7 +319,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                   color: Colors.orange, 
                   onPressed: () => _handlePayment(context, ref, staff, isAdvance: true)
                 ),
-                const SizedBox(width: 4), // Reduced from 8
+                const SizedBox(width: 4),
                 _salaryActionButton(
                   context, 
                   label: isPaidThisMonth ? 'PAID' : 'PAY', 
@@ -326,12 +328,12 @@ class SalaryManagementScreen extends ConsumerWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 6), // Reduced from 8
+            const SizedBox(height: 6),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: () => _showMonthSelector(context, ref, staff),
+                    onPressed: () => _showSalaryHistoryDetails(context, ref, staff),
                     icon: const Icon(Icons.history_rounded, size: 12),
                     label: const Text('HISTORY', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
                     style: OutlinedButton.styleFrom(
@@ -366,120 +368,6 @@ class SalaryManagementScreen extends ConsumerWidget {
     );
   }
 
-  void _showMonthSelector(BuildContext context, WidgetRef ref, UserAccount staff) async {
-    final String targetId = staff.id.trim().toLowerCase();
-    
-    // 1. Force a cloud refresh before searching to ensure we aren't looking at old local cache
-    await ref.read(salaryHistoryProvider.notifier).loadAll();
-    
-    if (!context.mounted) return;
-
-    // 2. Search with normalized IDs and partial matching for safety
-    final allPayments = ref.read(salaryHistoryProvider);
-    var workerPayments = allPayments.where((p) {
-      final String pId = p.userId.trim().toLowerCase();
-      // Match if exact OR if one contains the other (Supabase sometimes prefixes UUIDs)
-      return pId == targetId || pId.contains(targetId) || targetId.contains(pId);
-    }).toList();
-    
-    debugPrint('Salary History Diagnostic:');
-    debugPrint(' - Searching for Staff ID: "$targetId"');
-    debugPrint(' - Total records in database: ${allPayments.length}');
-    debugPrint(' - Matching records found: ${workerPayments.length}');
-
-    // Extract unique Year-Month combinations that actually have payments
-    final Set<String> uniqueMonthsSet = {};
-    final List<DateTime> availableMonths = [];
-    
-    for (var p in workerPayments) {
-      final key = "${p.date.year}-${p.date.month}";
-      if (!uniqueMonthsSet.contains(key)) {
-        uniqueMonthsSet.add(key);
-        availableMonths.add(DateTime(p.date.year, p.date.month, 1));
-      }
-    }
-    
-    availableMonths.sort((a, b) => b.compareTo(a)); // Newest months first
-    final List<DateTime> selectedMonths = [];
-
-    if (availableMonths.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No payment history found for ${staff.firstName}.'))
-        );
-      }
-      return;
-    }
-
-    if (context.mounted) {
-      showDialog(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-            title: Text('Select Payment Months', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Showing months with recorded payments for ${staff.firstName}:', 
-                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: 300,
-                  height: 250,
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: availableMonths.length,
-                    itemBuilder: (context, index) {
-                      final month = availableMonths[index];
-                      final isSelected = selectedMonths.any((m) => m.year == month.year && m.month == month.month);
-                      return CheckboxListTile(
-                        title: Text(DateFormat('MMMM yyyy').format(month), style: const TextStyle(fontSize: 14)),
-                        value: isSelected,
-                        onChanged: (val) {
-                          setDialogState(() {
-                            if (val!) {
-                              selectedMonths.add(month);
-                            } else {
-                              selectedMonths.removeWhere((m) => m.year == month.year && m.month == month.month);
-                            }
-                          });
-                        },
-                        dense: true,
-                        controlAffinity: ListTileControlAffinity.leading,
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
-              ElevatedButton(
-                onPressed: selectedMonths.isEmpty ? null : () {
-                  final filtered = workerPayments.where((p) {
-                    return selectedMonths.any((m) => m.year == p.date.year && m.month == p.date.month);
-                  }).toList();
-
-                  filtered.sort((a, b) => b.date.compareTo(a.date));
-                  
-                  final period = selectedMonths.length == 1 
-                      ? DateFormat('MMMM yyyy').format(selectedMonths.first)
-                      : 'Multiple Months';
-
-                  ReceiptService.printSalaryHistory(staff, filtered, period: period);
-                  Navigator.pop(context);
-                },
-                child: const Text('PRINT STATEMENT'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-  }
-
   Widget _salaryActionButton(BuildContext context, {required String label, required Color color, VoidCallback? onPressed}) {
     return Expanded(
       child: ElevatedButton(
@@ -487,7 +375,7 @@ class SalaryManagementScreen extends ConsumerWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: color, 
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 10), // Slightly smaller padding
+          padding: const EdgeInsets.symmetric(vertical: 10),
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
@@ -607,7 +495,6 @@ class SalaryManagementScreen extends ConsumerWidget {
   }
 
   void _handlePayment(BuildContext context, WidgetRef ref, UserAccount staff, {required bool isAdvance}) {
-    // When not an advance, calculate deductions automatically
     double initialAmount = isAdvance ? 0.0 : (staff.salaryAmount ?? 0.0);
     double totalAdvancesDetected = 0.0;
 
@@ -615,9 +502,6 @@ class SalaryManagementScreen extends ConsumerWidget {
       final allPayments = ref.read(salaryHistoryProvider);
       final lastFullSalaryDate = staff.lastSalaryDate ?? DateTime(2000);
       
-      // Calculate advances taken since last full salary
-      // We use a small buffer for the date to avoid missing same-day advances if any, 
-      // but usually lastSalaryDate is the end of the previous cycle.
       totalAdvancesDetected = allPayments
           .where((p) => p.userId == staff.id && p.isAdvance && p.date.isAfter(lastFullSalaryDate))
           .fold(0.0, (sum, p) => sum + p.amount);
@@ -628,6 +512,7 @@ class SalaryManagementScreen extends ConsumerWidget {
     }
 
     final amountController = TextEditingController(text: initialAmount > 0 ? initialAmount.toStringAsFixed(2) : '');
+    final noteController = TextEditingController();
     bool isProcessing = false;
     
     showDialog(
@@ -636,8 +521,8 @@ class SalaryManagementScreen extends ConsumerWidget {
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-          title: Text(isAdvance ? 'Salary Advance' : 'Confirm Payment'), // Shortened title
-          content: SingleChildScrollView( // Prevent keyboard overflow
+          title: Text(isAdvance ? 'Salary Advance' : 'Confirm Payment'),
+          content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -689,6 +574,17 @@ class SalaryManagementScreen extends ConsumerWidget {
                   autofocus: true,
                   enabled: !isProcessing,
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: noteController,
+                  decoration: InputDecoration(
+                    labelText: isAdvance ? 'Reason for Advance (Optional)' : 'Payment Note (Optional)',
+                    hintText: isAdvance ? 'e.g., Medical, School Fees' : 'e.g., Bonus included',
+                    border: const OutlineInputBorder(),
+                  ),
+                  enabled: !isProcessing,
+                  maxLines: 2,
+                ),
                 const SizedBox(height: 8),
                 const Text('Staff will be notified via SMS.', style: TextStyle(fontSize: 10, color: Colors.grey)),
               ],
@@ -710,7 +606,6 @@ class SalaryManagementScreen extends ConsumerWidget {
                 setState(() => isProcessing = true);
 
                 try {
-                  // 1. Save to database (Status update in user profile)
                   await ref.read(userProvider.notifier).updateSalary(
                     staff.id, 
                     amount: staff.salaryAmount, 
@@ -719,10 +614,13 @@ class SalaryManagementScreen extends ConsumerWidget {
                     isAdvance: isAdvance,
                   );
 
-                  // 2. Record individual payment history
                   String note = isAdvance ? 'Salary Advance' : 'Full Monthly Salary';
                   if (!isAdvance && totalAdvancesDetected > 0) {
                     note += ' (Deducted ₵${totalAdvancesDetected.toStringAsFixed(2)} in advances)';
+                  }
+                  
+                  if (noteController.text.trim().isNotEmpty) {
+                    note += ' - ${noteController.text.trim()}';
                   }
 
                   final record = SalaryRecord(
@@ -736,16 +634,15 @@ class SalaryManagementScreen extends ConsumerWidget {
                   
                   await ref.read(salaryHistoryProvider.notifier).addPayment(record);
                   
-                  // 3. Send Official Salary SMS
                   await SmsService.sendSalarySms(
                     phone: staff.phone ?? '', 
                     firstName: staff.firstName, 
                     amount: amount, 
-                    isAdvance: isAdvance
+                    isAdvance: isAdvance,
+                    note: noteController.text.trim().isNotEmpty ? noteController.text.trim() : null,
                   );
                   
-                  // 4. Automatically print payslip
-                  await ReceiptService.printPayslip(staff, amount, isAdvance);
+                  await ReceiptService.printPayslip(staff, amount, isAdvance, note: noteController.text.trim().isNotEmpty ? noteController.text.trim() : null);
 
                   if (context.mounted) {
                     Navigator.pop(context);
@@ -775,5 +672,279 @@ class SalaryManagementScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  void _showSalaryHistoryDetails(BuildContext context, WidgetRef ref, UserAccount staff) async {
+    await ref.read(salaryHistoryProvider.notifier).loadAll();
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          final allPayments = ref.watch(salaryHistoryProvider);
+          final workerPayments = allPayments.where((p) => p.userId == staff.id).toList();
+          workerPayments.sort((a, b) => b.date.compareTo(a.date));
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+            title: Row(
+              children: [
+                const Icon(Icons.history_rounded, color: AppColors.primaryMaroon),
+                const SizedBox(width: 12),
+                Expanded(child: Text('Payment History: ${staff.firstName}', overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+            content: SizedBox(
+              width: 500,
+              height: 400,
+              child: workerPayments.isEmpty 
+                ? const Center(child: Text('No payment history found.'))
+                : ListView.builder(
+                    itemCount: workerPayments.length,
+                    itemBuilder: (context, index) {
+                      final p = workerPayments[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: p.isAdvance ? Colors.orange.withValues(alpha: 0.1) : Colors.green.withValues(alpha: 0.1),
+                            child: Icon(p.isAdvance ? Icons.trending_up : Icons.check_circle, 
+                              color: p.isAdvance ? Colors.orange : Colors.green, size: 20),
+                          ),
+                          title: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('₵${p.amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              Text(DateFormat('MMM dd, yyyy').format(p.date), style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                            ],
+                          ),
+                          subtitle: Text(p.note ?? (p.isAdvance ? 'Advance' : 'Salary'), style: const TextStyle(fontSize: 11)),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit_note, size: 20, color: Colors.blue),
+                                onPressed: () => _showEditPaymentDialog(context, ref, p),
+                                tooltip: 'Edit Record',
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, size: 20, color: Colors.red),
+                                onPressed: () => _confirmDeletePayment(context, ref, p),
+                                tooltip: 'Delete Record',
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('CLOSE')),
+              ElevatedButton.icon(
+                onPressed: () => _showMonthSelector(context, ref, staff),
+                icon: const Icon(Icons.print_rounded, size: 16),
+                label: const Text('GENERATE STATEMENT'),
+              ),
+            ],
+          );
+        }
+      ),
+    );
+  }
+
+  void _showEditPaymentDialog(BuildContext context, WidgetRef ref, SalaryRecord record) {
+    final amountController = TextEditingController(text: record.amount.toStringAsFixed(2));
+    final noteController = TextEditingController(text: record.note);
+    bool isSaving = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Edit Payment Record'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: amountController,
+                decoration: const InputDecoration(labelText: 'Amount', prefixText: '₵ ', border: OutlineInputBorder()),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: noteController,
+                decoration: const InputDecoration(labelText: 'Note', border: OutlineInputBorder()),
+                maxLines: 2,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+            ElevatedButton(
+              onPressed: isSaving ? null : () async {
+                setState(() => isSaving = true);
+                try {
+                  final amount = double.tryParse(amountController.text) ?? record.amount;
+                  final updated = SalaryRecord(
+                    id: record.id,
+                    userId: record.userId,
+                    amount: amount,
+                    isAdvance: record.isAdvance,
+                    date: record.date,
+                    note: noteController.text,
+                  );
+                  await ref.read(salaryHistoryProvider.notifier).updatePayment(updated);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment record updated.')));
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    setState(() => isSaving = false);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                  }
+                }
+              },
+              child: const Text('SAVE'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmDeletePayment(BuildContext context, WidgetRef ref, SalaryRecord record) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Payment Record?'),
+        content: const Text('This will permanently remove this record from history. This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await ref.read(salaryHistoryProvider.notifier).deletePayment(record.id);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment record deleted.'), backgroundColor: Colors.red));
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('DELETE'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMonthSelector(BuildContext context, WidgetRef ref, UserAccount staff) async {
+    final String targetId = staff.id.trim().toLowerCase();
+    await ref.read(salaryHistoryProvider.notifier).loadAll();
+    if (!context.mounted) return;
+
+    final allPayments = ref.read(salaryHistoryProvider);
+    var workerPayments = allPayments.where((p) {
+      final String pId = p.userId.trim().toLowerCase();
+      return pId == targetId || pId.contains(targetId) || targetId.contains(pId);
+    }).toList();
+    
+    final Set<String> uniqueMonthsSet = {};
+    final List<DateTime> availableMonths = [];
+    
+    for (var p in workerPayments) {
+      final key = "${p.date.year}-${p.date.month}";
+      if (!uniqueMonthsSet.contains(key)) {
+        uniqueMonthsSet.add(key);
+        availableMonths.add(DateTime(p.date.year, p.date.month, 1));
+      }
+    }
+    
+    availableMonths.sort((a, b) => b.compareTo(a));
+    final List<DateTime> selectedMonths = [];
+
+    if (availableMonths.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No payment history found for ${staff.firstName}.'))
+        );
+      }
+      return;
+    }
+
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+            title: const Text('Select Payment Months', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Showing months with recorded payments for ${staff.firstName}:', 
+                  style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: 300,
+                  height: 250,
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: availableMonths.length,
+                    itemBuilder: (context, index) {
+                      final month = availableMonths[index];
+                      final isSelected = selectedMonths.any((m) => m.year == month.year && m.month == month.month);
+                      return CheckboxListTile(
+                        title: Text(DateFormat('MMMM yyyy').format(month), style: const TextStyle(fontSize: 14)),
+                        value: isSelected,
+                        onChanged: (val) {
+                          setDialogState(() {
+                            if (val!) {
+                              selectedMonths.add(month);
+                            } else {
+                              selectedMonths.removeWhere((m) => m.year == month.year && m.month == month.month);
+                            }
+                          });
+                        },
+                        dense: true,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+              ElevatedButton(
+                onPressed: selectedMonths.isEmpty ? null : () {
+                  final filtered = workerPayments.where((p) {
+                    return selectedMonths.any((m) => m.year == p.date.year && m.month == p.date.month);
+                  }).toList();
+
+                  filtered.sort((a, b) => b.date.compareTo(a.date));
+                  
+                  final period = selectedMonths.length == 1 
+                      ? DateFormat('MMMM yyyy').format(selectedMonths.first)
+                      : 'Multiple Months';
+
+                  ReceiptService.printSalaryHistory(staff, filtered, period: period);
+                  Navigator.pop(context);
+                },
+                child: const Text('PRINT STATEMENT'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
   }
 }

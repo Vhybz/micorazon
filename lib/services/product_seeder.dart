@@ -1,5 +1,6 @@
 import '../core/uuid_utils.dart';
 import '../models/product.dart';
+import '../models/butcher_models.dart';
 import 'product_service.dart';
 import 'user_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,14 +18,17 @@ class ProductSeeder {
     final List<Map<String, List<String>>> data = [
       {
         'CHICKEN': [
-          'Hard Thigh (Layer)', 'Soft Thigh (Broiler)', 'Hard Breast (Layer)', 'Soft Breast (Broiler)', 
-          'Hard Back (Layer)', 'Soft Back (Broiler)', 'Hard Wings (Layer)', 'Soft Wings (Broiler)', 
-          'Hard Half Chicken (Layer)', 'Soft Half Chicken (Broiler)', 'Hard Whole Chicken (Layer)', 
-          'Soft Whole Chicken (Broiler)', 'Hard Drumsticks (Layer)', 'Soft Drumsticks (Broiler)'
+          'Hard Whole Chicken (Layer)', 'Soft Whole Chicken (Broiler)',
+          'Hard Thigh (Layer)', 'Soft Thigh (Broiler)', 
+          'Hard Breast (Layer)', 'Soft Breast (Broiler)', 
+          'Hard Back (Layer)', 'Soft Back (Broiler)', 
+          'Hard Wings (Layer)', 'Soft Wings (Broiler)', 
+          'Hard Drumsticks (Layer)', 'Soft Drumsticks (Broiler)',
+          'Gizzard'
         ]
       },
       {
-        'COW': [ // Changed from BEEF to COW
+        'COW': [ 
           'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Cow Steak',
           'Liver & Lungs', 'Grounded Meat', 'Feet', 'Head', 'Tail / Padua'
         ]
@@ -66,24 +70,59 @@ class ProductSeeder {
       final productNames = categoryMap.values.first;
 
       for (var name in productNames) {
-        if (existingNames.contains(name.toLowerCase())) continue;
+        if (category == 'CHICKEN' && name.toUpperCase() != 'GIZZARD') {
+          // Special handling for chicken parts - Create separate cards for each weight range
+          final bool isHard = name.contains('Hard');
+          final type = isHard ? AnimalType.hardChicken : AnimalType.softChicken;
+          final ranges = type.chickenRanges;
 
-        final String validUuid = UuidUtils.generate();
+          for (var range in ranges) {
+            final rangeName = '$name (${range.label})';
+            if (existingNames.contains(rangeName.toLowerCase())) continue;
 
-        final product = Product(
-          id: validUuid,
-          branchCode: user.branchCode,
-          name: name,
-          retailPrice: 0.0,
-          wholesalePrice: 0.0,
-          costPrice: 0.0, // Initializing with zero as requested
-          imageUrl: '', 
-          category: category,
-          stockQuantity: 0.0,
-          unit: (name.contains('Whole') || category == 'TURKEY' || category == 'RABBIT') ? 'unit' : 'kg',
-        );
-        
-        await service.addProduct(product);
+            // Only set price automatically for Whole Chickens
+            final double initialPrice = name.contains('Whole') ? range.price : 0.0;
+            final String validUuid = UuidUtils.generate();
+
+            final product = Product(
+              id: validUuid,
+              branchCode: user.branchCode,
+              name: rangeName,
+              retailPrice: initialPrice,
+              wholesalePrice: 0.0,
+              costPrice: 0.0,
+              imageUrl: '', 
+              category: category,
+              stockQuantity: 0.0,
+              unit: 'unit',
+            );
+            await service.addProduct(product);
+          }
+        } else {
+          // Standard single card seeding for other items
+          if (existingNames.contains(name.toLowerCase())) continue;
+
+          final String validUuid = UuidUtils.generate();
+
+          final product = Product(
+            id: validUuid,
+            branchCode: user.branchCode,
+            name: name,
+            retailPrice: 0.0,
+            wholesalePrice: 0.0,
+            costPrice: 0.0,
+            imageUrl: '', 
+            category: category,
+            stockQuantity: 0.0,
+            unit: (name.contains('Whole') || 
+                   category == 'TURKEY' || 
+                   category == 'RABBIT') 
+                  ? 'unit' 
+                  : 'kg',
+          );
+          
+          await service.addProduct(product);
+        }
       }
     }
   }

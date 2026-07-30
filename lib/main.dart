@@ -23,6 +23,7 @@ import 'screens/admin/recents_screen.dart';
 import 'screens/admin/system_maintenance_screen.dart';
 import 'screens/admin/tax_compliance_screen.dart';
 import 'screens/admin/salary_management_screen.dart';
+import 'screens/admin/audit_trail_screen.dart';
 import 'screens/butcher/documents_screen.dart';
 import 'screens/cashier/cashier_pos.dart';
 import 'screens/cashier/stock_verification_screen.dart';
@@ -235,24 +236,32 @@ class InitializationErrorScreen extends StatelessWidget {
 void _showManualConfigDialog(BuildContext context) {
   final urlController = TextEditingController();
   final keyController = TextEditingController();
+  final serviceKeyController = TextEditingController();
 
   showDialog(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Manual Supabase Config'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: urlController,
-            decoration: const InputDecoration(labelText: 'Supabase URL', hintText: 'https://xxx.supabase.co'),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: keyController,
-            decoration: const InputDecoration(labelText: 'Anon Key'),
-          ),
-        ],
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: urlController,
+              decoration: const InputDecoration(labelText: 'Supabase URL', hintText: 'https://xxx.supabase.co'),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: keyController,
+              decoration: const InputDecoration(labelText: 'Anon Key'),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: serviceKeyController,
+              decoration: const InputDecoration(labelText: 'Service Role Key (Optional)', hintText: 'Required for Password Reset'),
+            ),
+          ],
+        ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
@@ -260,13 +269,15 @@ void _showManualConfigDialog(BuildContext context) {
           onPressed: () async {
             if (urlController.text.isNotEmpty && keyController.text.isNotEmpty) {
               try {
+                // This doesn't fully re-initialize our SupabaseConfig class, 
+                // but it might help for standard operations.
+                // Note: Re-initialization usually isn't supported well by the SDK.
                 await Supabase.initialize(
                   url: urlController.text.trim(),
                   publishableKey: keyController.text.trim(),
                 );
                 if (context.mounted) {
                   Navigator.pop(context);
-                  // Since we are in a minimal MaterialApp, just showing success
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Config saved! Please refresh the page.')),
                   );
@@ -322,6 +333,7 @@ class MeatShopApp extends ConsumerWidget {
         '/admin/butcher': (context) => const ButcherAnalyticsScreen(),
         '/admin/recents': (context) => const RecentsScreen(),
         '/admin/maintenance': (context) => const SystemMaintenanceScreen(),
+        '/admin/audit': (context) => const AuditTrailScreen(),
         '/admin/settings': (context) => const SystemSettingsScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/profile': (context) => const ProfileScreen(),

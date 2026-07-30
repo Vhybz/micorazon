@@ -11,6 +11,29 @@ enum MeatBatchStatus {
   completed 
 }
 
+class ChickenRange {
+  final double minWeight;
+  final double maxWeight;
+  final double price;
+
+  ChickenRange({required this.minWeight, required this.maxWeight, required this.price});
+
+  String get label => '$minWeight - $maxWeight LB';
+  double get averageWeight => (minWeight + maxWeight) / 2;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ChickenRange &&
+          runtimeType == other.runtimeType &&
+          minWeight == other.minWeight &&
+          maxWeight == other.maxWeight &&
+          price == other.price;
+
+  @override
+  int get hashCode => minWeight.hashCode ^ maxWeight.hashCode ^ price.hashCode;
+}
+
 enum AnimalType { cow, bull, pig, sheep, goat, hardChicken, softChicken, turkey, rabbit }
 
 extension AnimalTypeX on AnimalType {
@@ -20,6 +43,24 @@ extension AnimalTypeX on AnimalType {
       case AnimalType.softChicken: return 'CHICKEN (BROILERS)';
       default: return name.toUpperCase();
     }
+  }
+
+  List<ChickenRange> get chickenRanges {
+    if (this == AnimalType.softChicken) {
+      return [
+        ChickenRange(minWeight: 3.0, maxWeight: 4.0, price: 140),
+        ChickenRange(minWeight: 4.1, maxWeight: 5.0, price: 165),
+        ChickenRange(minWeight: 5.1, maxWeight: 6.0, price: 170),
+        ChickenRange(minWeight: 6.1, maxWeight: 7.0, price: 180),
+      ];
+    } else if (this == AnimalType.hardChicken) {
+      return [
+        ChickenRange(minWeight: 1.5, maxWeight: 1.9, price: 95),
+        ChickenRange(minWeight: 2.0, maxWeight: 2.3, price: 100),
+        ChickenRange(minWeight: 2.4, maxWeight: 2.8, price: 110),
+      ];
+    }
+    return [];
   }
 
   String get shortCode {
@@ -89,43 +130,43 @@ extension AnimalTypeX on AnimalType {
         ];
       case AnimalType.hardChicken:
         return [
-          'Hard Thigh',
-          'Soft Thigh',
-          'Hard Breast',
-          'Soft Breast',
-          'Hard Back',
-          'Soft Back',
-          'Hard Wings',
-          'Soft Wings',
-          'Hard Half Chicken',
-          'Soft Half Chicken',
-          'Hard Whole Chicken',
-          'Soft Whole Chicken',
-          'Hard Drumsticks',
-          'Soft Drumsticks',
+          'Hard Whole Chicken (Layer)',
+          'Hard Thigh (Layer)',
+          'Hard Breast (Layer)',
+          'Hard Back (Layer)',
+          'Hard Wings (Layer)',
+          'Hard Drumsticks (Layer)',
+          'Gizzard',
         ];
       case AnimalType.softChicken:
         return [
-          'Hard Thigh',
-          'Soft Thigh',
-          'Hard Breast',
-          'Soft Breast',
-          'Hard Back',
-          'Soft Back',
-          'Hard Wings',
-          'Soft Wings',
-          'Hard Half Chicken',
-          'Soft Half Chicken',
-          'Hard Whole Chicken',
-          'Soft Whole Chicken',
-          'Hard Drumsticks',
-          'Soft Drumsticks',
+          'Soft Whole Chicken (Broiler)',
+          'Soft Thigh (Broiler)',
+          'Soft Breast (Broiler)',
+          'Soft Back (Broiler)',
+          'Soft Wings (Broiler)',
+          'Soft Drumsticks (Broiler)',
+          'Gizzard',
         ];
       case AnimalType.turkey:
         return ['Whole Turkey', 'Breast', 'Thighs', 'Drumsticks', 'Wings', 'Gizzards', 'Feet'];
       case AnimalType.rabbit:
         return ['Whole Rabbit', 'Legs', 'Saddle', 'Shoulders'];
     }
+  }
+
+  String defaultUnitFor(String cut) {
+    if (cut == 'Head' && (this == AnimalType.goat || this == AnimalType.sheep)) {
+      return 'Qty';
+    }
+    return 'kg';
+  }
+
+  double? defaultValueFor(String cut) {
+    if (cut == 'Head' && (this == AnimalType.goat || this == AnimalType.sheep)) {
+      return 1.0;
+    }
+    return null;
   }
 }
 
@@ -136,6 +177,7 @@ class SlaughterLog {
   final String? tagNumber; // Human-readable ID (Auto-generated)
   final String? manualFarmTag; // Optional manual farm tag from the farm
   final AnimalType type;
+  final int quantity; // Added for batches (e.g. Chicken)
   final double liveWeight;
   final double meatWeight;
   final double price; // Selling price (Standard)
@@ -150,6 +192,7 @@ class SlaughterLog {
     this.tagNumber,
     this.manualFarmTag,
     required this.type,
+    this.quantity = 1,
     required this.liveWeight,
     required this.meatWeight,
     required this.price,
@@ -175,6 +218,7 @@ class SlaughterLog {
     String? tagNumber,
     String? manualFarmTag,
     AnimalType? type,
+    int? quantity,
     double? liveWeight,
     double? meatWeight,
     double? price,
@@ -189,6 +233,7 @@ class SlaughterLog {
       tagNumber: tagNumber ?? this.tagNumber,
       manualFarmTag: manualFarmTag ?? this.manualFarmTag,
       type: type ?? this.type,
+      quantity: quantity ?? this.quantity,
       liveWeight: liveWeight ?? this.liveWeight,
       meatWeight: meatWeight ?? this.meatWeight,
       price: price ?? this.price,
@@ -207,6 +252,7 @@ class SlaughterLog {
       tagNumber: map['tag_number'] as String?,
       manualFarmTag: map['manual_farm_tag'] as String?,
       type: AnimalType.values.firstWhere((e) => e.name == map['type']),
+      quantity: map['quantity'] as int? ?? 1,
       liveWeight: (map['initial_weight'] as num).toDouble(),
       meatWeight: (map['carcass_weight'] as num? ?? 0).toDouble(),
       price: (map['price'] as num? ?? 0).toDouble(),
@@ -223,6 +269,7 @@ class SlaughterLog {
     'tag_number': tagNumber,
     'manual_farm_tag': manualFarmTag,
     'type': type.name,
+    'quantity': quantity,
     'initial_weight': liveWeight,
     'carcass_weight': meatWeight,
     'price': price,

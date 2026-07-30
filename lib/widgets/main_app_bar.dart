@@ -12,6 +12,8 @@ import 'calculator_dialog.dart';
 import 'ai_chatbot_sheet.dart';
 import '../services/transfer_provider.dart';
 import '../services/branch_provider.dart';
+import '../services/sync_provider.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class MainAppBar extends ConsumerStatefulWidget implements PreferredSizeWidget {
   final String title;
@@ -155,6 +157,29 @@ class _MainAppBarState extends ConsumerState<MainAppBar> with SingleTickerProvid
 
                 // 3. Right Actions (Critical Apps)
                 const SizedBox(width: 4),
+                _buildRoundButton(
+                  context, 
+                  Icons.lock_outline_rounded, 
+                  () {
+                    HapticFeedback.mediumImpact();
+                    ref.read(passcodeUnlockedProvider.notifier).state = false;
+                  },
+                  size: isMobile ? 36 : 42,
+                  iconSize: isMobile ? 18 : 20,
+                  tooltip: 'Lock System',
+                ),
+                const SizedBox(width: 4),
+                _buildRoundButton(
+                  context, 
+                  Icons.calculate_outlined, 
+                  () => showDialog(context: context, builder: (context) => const CalculatorDialog()),
+                  size: isMobile ? 36 : 42,
+                  iconSize: isMobile ? 18 : 20,
+                  tooltip: 'Quick Calculator',
+                ),
+                const SizedBox(width: 4),
+                if (widget.actions != null) ...widget.actions!,
+                const SizedBox(width: 4),
                 _buildNotificationButton(context, unreadCount, () => _showNotificationsDialog(context, ref, notifications), isMobile),
                 const SizedBox(width: 4),
                 _buildProfileAvatar(context, ref, roleColor, isMobile),
@@ -222,11 +247,11 @@ class _MainAppBarState extends ConsumerState<MainAppBar> with SingleTickerProvid
           ref.read(transferProvider.notifier).loadTransfers();
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Syncing Data...'), duration: Duration(milliseconds: 500)));
         }),
+        const SizedBox(width: 12),
+        _buildToolIcon(Icons.calculate_outlined, () => showDialog(context: context, builder: (context) => const CalculatorDialog())),
+        const SizedBox(width: 12),
+        _buildToolIcon(Icons.auto_awesome_outlined, () => _showAiChatbot(context)),
         if (!isMobile) ...[
-          const SizedBox(width: 12),
-          _buildToolIcon(Icons.calculate_outlined, () => showDialog(context: context, builder: (context) => const CalculatorDialog())),
-          const SizedBox(width: 12),
-          _buildToolIcon(Icons.auto_awesome_outlined, () => _showAiChatbot(context)),
           const SizedBox(width: 12),
           _buildToolIcon(
             isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined, 
@@ -249,28 +274,36 @@ class _MainAppBarState extends ConsumerState<MainAppBar> with SingleTickerProvid
   }
 
   Widget _buildLiveIndicator(WidgetRef ref) {
-    final heartbeat = ref.watch(liveHeartbeatProvider);
-    return heartbeat.when(
-      data: (tick) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.green.withValues(alpha: 0.5)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 5,
-              height: 5,
-              decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 4),
-            const Text('LIVE', style: TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
-          ],
-        ),
-      ),
+    final connectivity = ref.watch(connectivityStatusProvider);
+    
+    return connectivity.when(
+      data: (results) {
+        final isOffline = results.every((result) => result == ConnectivityResult.none);
+        final color = isOffline ? Colors.red : Colors.green;
+        final text = isOffline ? 'OFFLINE' : 'LIVE';
+        final iconColor = isOffline ? Colors.red : Colors.green;
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: color.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 5,
+                height: 5,
+                decoration: BoxDecoration(color: iconColor, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 4),
+              Text(text, style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        );
+      },
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const Icon(Icons.sync_problem, size: 12, color: Colors.white),
     );
@@ -339,8 +372,8 @@ class _MainAppBarState extends ConsumerState<MainAppBar> with SingleTickerProvid
     );
   }
 
-  Widget _buildRoundButton(BuildContext context, IconData icon, VoidCallback onTap, {double size = 40, double iconSize = 20, Color? color}) {
-    return SizedBox(
+  Widget _buildRoundButton(BuildContext context, IconData icon, VoidCallback onTap, {double size = 40, double iconSize = 20, Color? color, String? tooltip}) {
+    Widget button = SizedBox(
       width: size,
       height: size,
       child: Material(
@@ -355,6 +388,11 @@ class _MainAppBarState extends ConsumerState<MainAppBar> with SingleTickerProvid
         ),
       ),
     );
+
+    if (tooltip != null) {
+      return Tooltip(message: tooltip, child: button);
+    }
+    return button;
   }
 
   // Show Notifications

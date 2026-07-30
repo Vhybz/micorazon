@@ -24,27 +24,36 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
 
   void _startSubscription() {
     _subscription?.cancel();
-    _subscription = service.watchUsers().listen((users) {
-      final currentUser = ref.read(sessionUserProfileProvider);
-      List<UserAccount> filteredUsers = users;
-      
-      if (currentUser?.role != UserRole.superAdmin && currentUser?.branchCode != null) {
-        filteredUsers = users.where((u) => u.branchCode == currentUser!.branchCode).toList();
-      }
-      
-      state = filteredUsers;
-      
-      // Update session profile if current user is in the list
-      final currentId = ref.read(currentUserIdProvider);
-      if (currentId != null) {
-        final me = users.where((u) => u.id == currentId).firstOrNull;
-        if (me != null) {
-          ref.read(sessionUserProfileProvider.notifier).state = me;
+    _subscription = service.watchUsers().listen(
+      (users) {
+        final currentUser = ref.read(sessionUserProfileProvider);
+        List<UserAccount> filteredUsers = users;
+        
+        if (currentUser?.role != UserRole.superAdmin && currentUser?.branchCode != null) {
+          filteredUsers = users.where((u) => u.branchCode == currentUser!.branchCode).toList();
         }
-      }
-    }, onError: (e) {
-      debugPrint('User Stream Error: $e');
-    });
+        
+        state = filteredUsers;
+        
+        // Update session profile if current user is in the list
+        final currentId = ref.read(currentUserIdProvider);
+        if (currentId != null) {
+          final oldMe = ref.read(sessionUserProfileProvider);
+          final me = users.where((u) => u.id == currentId).firstOrNull;
+          if (me != null) {
+            // SECURITY: If passcode changed remotely (e.g. by admin), lock the account immediately
+            if (oldMe != null && (me.passcode != oldMe.passcode || me.passcodeSentAt != oldMe.passcodeSentAt)) {
+              ref.read(passcodeUnlockedProvider.notifier).state = false;
+            }
+            ref.read(sessionUserProfileProvider.notifier).state = me;
+          }
+        }
+      }, 
+      onError: (e) {
+        debugPrint('User Stream Connection Error (Resuming?): $e');
+      },
+      cancelOnError: false,
+    );
   }
 
   void _startHeartbeat() {
@@ -398,6 +407,30 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
     }
   }
 
+  Future<void> updatePasscode(String userId, String passcode) async {
+    try {
+      final user = await _getUser(userId);
+      if (user != null) {
+        final now = DateTime.now();
+        final updatedUser = user.copyWith(passcode: passcode, passcodeSentAt: now);
+        
+        // SECURITY: If updating current user's PIN, lock immediately
+        if (userId == ref.read(currentUserIdProvider)) {
+          ref.read(passcodeUnlockedProvider.notifier).state = false;
+        }
+
+        _updateLocalAndSession(updatedUser);
+        await service.updateUserFields(userId, {
+          'passcode': passcode,
+          'passcode_sent_at': now.toIso8601String(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Update Passcode Error: $e');
+      rethrow;
+    }
+  }
+
   // Helper to find a user even if they aren't in the currently filtered state list
   Future<UserAccount?> _getUser(String id) async {
     try {
@@ -463,13 +496,19 @@ final currentUserIdProvider = StateProvider<String?>((ref) => null);
 // This holds the currently logged-in user's profile and is updated instantly locally
 final sessionUserProfileProvider = StateProvider<UserAccount?>((ref) => null);
 
+/// A session-based state provider to track if the current user has unlocked the system
+final passcodeUnlockedProvider = StateProvider<bool>((ref) => false);
+
+/// A global state provider for Emergency System Lockdown
+final systemLockdownProvider = StateProvider<bool>((ref) => false);
+
 /// Listens for real-time changes to the current user's profile from the database
 final currentUserStreamProvider = StreamProvider<UserAccount?>((ref) {
   final id = ref.watch(currentUserIdProvider);
   if (id == null) return const Stream.empty();
   
   return ref.watch(userServiceProvider).streamUser(id).handleError((error) {
-    debugPrint('Real-time User Stream Error: $error');
+    debugPrint('Real-time User Profile Stream Error (Normal on background): $error');
   });
 });
 

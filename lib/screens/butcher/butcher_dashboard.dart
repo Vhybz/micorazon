@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants.dart';
@@ -465,6 +466,7 @@ class ButcherDashboard extends ConsumerWidget {
     final meatTypeController = TextEditingController();
     final weightController = TextEditingController();
     String destinationType = 'COLDROOM'; // Default
+    WeightUnit selectedUnit = WeightUnit.kg;
     final theme = Theme.of(context);
 
     showDialog(
@@ -481,7 +483,16 @@ class ButcherDashboard extends ConsumerWidget {
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(labelText: 'Meat Category'),
                   items: ['Beef', 'Pork', 'Chicken', 'Goat', 'Sheep', 'Rabbit'].map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
-                  onChanged: (v) => selectedCategory = v,
+                  onChanged: (v) {
+                    setState(() {
+                      selectedCategory = v;
+                      if (v == 'Chicken') {
+                        selectedUnit = WeightUnit.unit;
+                      } else {
+                        selectedUnit = WeightUnit.kg;
+                      }
+                    });
+                  },
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -489,10 +500,49 @@ class ButcherDashboard extends ConsumerWidget {
                   decoration: const InputDecoration(labelText: 'Specific Cut / Type', hintText: 'e.g. Standard Meat'),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: weightController,
-                  decoration: const InputDecoration(labelText: 'Quantity (kg)', suffixText: 'kg'),
-                  keyboardType: TextInputType.number,
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: weightController,
+                        decoration: InputDecoration(
+                          labelText: selectedUnit == WeightUnit.unit ? 'Quantity' : 'Weight (${selectedUnit.name})',
+                          suffixText: selectedUnit == WeightUnit.unit ? 'pcs' : selectedUnit.name,
+                        ),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      children: [
+                        const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                        ToggleButtons(
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+                          isSelected: [
+                            selectedUnit == WeightUnit.kg, 
+                            selectedUnit == WeightUnit.g,
+                            selectedUnit == WeightUnit.lb,
+                            selectedUnit == WeightUnit.unit,
+                          ],
+                          onPressed: (index) {
+                            setState(() {
+                              selectedUnit = WeightUnit.values[index];
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          selectedColor: Colors.white,
+                          fillColor: theme.colorScheme.primary,
+                          children: const [
+                            Text('kg', style: TextStyle(fontSize: 9)),
+                            Text('g', style: TextStyle(fontSize: 9)),
+                            Text('lb', style: TextStyle(fontSize: 9)),
+                            Text('pcs', style: TextStyle(fontSize: 9)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 const Divider(),
@@ -534,8 +584,15 @@ class ButcherDashboard extends ConsumerWidget {
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
             ElevatedButton(
               onPressed: () async {
-                final weight = double.tryParse(weightController.text) ?? 0;
-                if (weight <= 0) return;
+                double weightVal = double.tryParse(weightController.text) ?? 0;
+                if (weightVal <= 0) return;
+
+                // Conversion to KG
+                if (selectedUnit == WeightUnit.g) {
+                  weightVal = WeightConverter.fromG(weightVal);
+                } else if (selectedUnit == WeightUnit.lb) {
+                  weightVal = WeightConverter.toKg(weightVal);
+                }
 
                 final user = ref.read(currentUserProvider);
                 
@@ -546,7 +603,8 @@ class ButcherDashboard extends ConsumerWidget {
                   id: UuidUtils.generate(),
                   batchId: 'DIRECT-DAILY',
                   meatType: '$categoryPart$cutPart',
-                  weight: weight,
+                  weight: weightVal,
+                  unit: selectedUnit == WeightUnit.unit ? 'unit' : 'kg',
                   branchCode: user?.branchCode, // Set source branch
                   destination: destinationType == 'COLDROOM' ? (user?.branchCode ?? 'MAIN') : 'THIRDPARTY',
                   transferTime: DateTime.now(),
@@ -655,7 +713,7 @@ class ButcherDashboard extends ConsumerWidget {
                           : 'Pending',
                         style: const TextStyle(fontSize: 10),
                       )),
-                      DataCell(Text(WeightConverter.formatShort(log.weight), style: const TextStyle(fontSize: 10))),
+                      DataCell(Text(WeightConverter.formatShort(log.weight, unit: 'kg'), style: const TextStyle(fontSize: 10))),
                       DataCell(StatusChip(label: log.status.name.toUpperCase(), color: _getStatusColor(log.status))),
                     ])).toList(),
                   ),

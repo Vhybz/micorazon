@@ -23,6 +23,7 @@ import '../../services/branch_provider.dart';
 import '../../widgets/role_pop_scope.dart';
 import '../../services/report_service.dart';
 import '../../services/birthday_service.dart';
+import '../../widgets/passcode_guard.dart';
 
 class AdminDashboard extends ConsumerStatefulWidget {
   const AdminDashboard({super.key});
@@ -121,58 +122,60 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
             ),
           );
         },
-        child: Scaffold(
-          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-          appBar: const MainAppBar(title: 'Admin Command Center'),
-          drawer: isDesktop
-              ? null
-              : Drawer(
-                  child: AppSidebar(
+        child: PasscodeGuard(
+          child: Scaffold(
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+            appBar: const MainAppBar(title: 'Admin Command Center'),
+            drawer: isDesktop
+                ? null
+                : Drawer(
+                    child: AppSidebar(
+                      userId: user.id,
+                      userName: user.name,
+                      userRole: user.activePrimaryRole.toString().split('.').last.toUpperCase(),
+                      currentRoute: currentRoute,
+                      items: menuItems,
+                      onTap: (route) => MenuService.navigate(context, route, currentRoute),
+                    ),
+                  ),
+            body: Row(
+              children: [
+                if (isDesktop)
+                  AppSidebar(
                     userId: user.id,
                     userName: user.name,
-                    userRole: user.activePrimaryRole.name.toUpperCase(),
+                    userRole: user.activePrimaryRole.toString().split('.').last.toUpperCase(),
                     currentRoute: currentRoute,
                     items: menuItems,
                     onTap: (route) => MenuService.navigate(context, route, currentRoute),
                   ),
-                ),
-          body: Row(
-            children: [
-              if (isDesktop)
-                AppSidebar(
-                  userId: user.id,
-                  userName: user.name,
-                  userRole: user.activePrimaryRole.name.toUpperCase(),
-                  currentRoute: currentRoute,
-                  items: menuItems,
-                  onTap: (route) => MenuService.navigate(context, route, currentRoute),
-                ),
-              Expanded(
-                child: SafeArea(
-                  top: false,
-                  bottom: true,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(AppSpacing.l),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHeader(context, dateStr, user, currentBranch),
-                        const SizedBox(height: AppSpacing.l),
-                        _buildBanner(context),
-                        const SizedBox(height: AppSpacing.xl),
-                        _buildKPIGrid(context, ref),
-                        const SizedBox(height: AppSpacing.xl),
-                        _buildPendingActions(context, ref),
-                        const SizedBox(height: AppSpacing.xl),
-                        _buildResponsiveMainContent(context, ref),
-                        const SizedBox(height: AppSpacing.xl),
-                        _buildInventoryMonitor(context, ref),
-                      ],
+                Expanded(
+                  child: SafeArea(
+                    top: false,
+                    bottom: true,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(AppSpacing.l),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildHeader(context, dateStr, user, currentBranch),
+                          const SizedBox(height: AppSpacing.l),
+                          _buildBanner(context),
+                          const SizedBox(height: AppSpacing.xl),
+                          _buildKPIGrid(context, ref),
+                          const SizedBox(height: AppSpacing.xl),
+                          _buildPendingActions(context, ref),
+                          const SizedBox(height: AppSpacing.xl),
+                          _buildResponsiveMainContent(context, ref),
+                          const SizedBox(height: AppSpacing.xl),
+                          _buildInventoryMonitor(context, ref),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -920,12 +923,12 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
       return date.day == now.day && date.month == now.month && date.year == now.year;
     }).toList() ?? [];
 
-    final totalRevenue = sales.fold(0.0, (sum, sale) => sum + sale.totalAmount);
-    final totalCost = sales.fold(0.0, (sum, sale) => sum + sale.totalCost);
+    final totalRevenue = sales.where((s) => s.isActive).fold(0.0, (sum, sale) => sum + sale.totalAmount);
+    final totalCost = sales.where((s) => s.isActive).fold(0.0, (sum, sale) => sum + sale.totalCost);
     final grossProfit = totalRevenue - totalCost;
     
     // Total Debt should reflect all-time outstanding balance, not just the current month
-    final totalDebt = allSales.where((s) => s.status != SaleStatus.cancelled)
+    final totalDebt = allSales.where((s) => s.isActive)
         .fold(0.0, (sum, sale) => sum + (sale.balance > 0 ? sale.balance : 0));
 
     final totalDiscounts = sales.fold(0.0, (sum, sale) => sum + sale.totalDiscount);
@@ -941,7 +944,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
     final theme = Theme.of(context);
 
     int crossAxisCount = isMobile ? 2 : (isTablet ? 4 : 4);
-    double aspectRatio = isMobile ? 1.4 : 1.8;
+    double aspectRatio = isMobile ? 1.4 : 1.5;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -979,7 +982,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
           physics: const NeverScrollableScrollPhysics(),
           crossAxisSpacing: AppSpacing.m,
           mainAxisSpacing: AppSpacing.m,
-          childAspectRatio: isMobile ? 1.4 : 2.5,
+          childAspectRatio: isMobile ? 1.4 : 1.6,
           children: [
             _kpiWithTrend(context, 'Total Debt', '₵${totalDebt.toStringAsFixed(0)}', Icons.money_off, Colors.red, 'TOTAL'),
             _kpiWithTrend(context, 'Promo Impact', '₵${totalDiscounts.toStringAsFixed(0)}', Icons.auto_awesome, Colors.orange, 'SAVED'),
@@ -1032,18 +1035,22 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
                   child: Text(value, style: TextStyle(fontSize: isMobile ? 12 : 16, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
                 ),
                 const SizedBox(height: 1),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: isPositive ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    trend,
-                    style: TextStyle(
-                      color: isPositive ? Colors.green : Colors.red,
-                      fontSize: isMobile ? 6 : 8,
-                      fontWeight: FontWeight.bold,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: isPositive ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      trend,
+                      style: TextStyle(
+                        color: isPositive ? Colors.green : Colors.red,
+                        fontSize: isMobile ? 6 : 8,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ),

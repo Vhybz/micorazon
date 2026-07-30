@@ -6,9 +6,10 @@ import '../../widgets/main_app_bar.dart';
 import '../../services/sale_provider.dart';
 import '../../services/expense_provider.dart';
 import '../../models/sale_model.dart';
-import '../../models/user_model.dart';
 import '../../services/receipt_service.dart';
 import '../../services/notification_service.dart';
+import '../../services/sms_service.dart';
+import '../../services/branch_provider.dart';
 import '../../core/utils.dart';
 import 'package:intl/intl.dart';
 
@@ -17,6 +18,7 @@ import '../../widgets/app_sidebar.dart';
 import '../../widgets/role_pop_scope.dart';
 import '../../services/menu_service.dart';
 import '../../services/user_provider.dart';
+import '../../widgets/phone_prompt_dialog.dart';
 
 class SalesReportsScreen extends ConsumerStatefulWidget {
   const SalesReportsScreen({super.key});
@@ -34,6 +36,14 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
   final Set<String> _selectedSaleIds = {};
   bool _isPrintingSelected = false;
   bool _isDeletingSelected = false;
+
+  String? _cashierFilter;
+  PaymentMethod? _paymentMethodFilter;
+  double? _minTotal;
+  double? _maxTotal;
+
+  int? _sortColumnIndex;
+  bool _sortAscending = true;
 
   @override
   void initState() {
@@ -54,37 +64,28 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
 
     final theme = Theme.of(context);
     final salesHistory = ref.watch(saleHistoryProvider);
+    final expenseState = ref.watch(expenseProvider);
     
-    final isCashier = user.activePrimaryRole == UserRole.cashier;
-    final now = DateTime.now();
-
     final filteredSales = salesHistory.where((sale) {
-      final matchesSearch = sale.id.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                           sale.cashierName.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                           (sale.customerName?.toLowerCase().contains(_searchQuery.toLowerCase()) ?? false) ||
-                           sale.items.any((item) => 
-                             item.product.name.toLowerCase().contains(_searchQuery.toLowerCase()) ||
-                             item.product.category.toLowerCase().contains(_searchQuery.toLowerCase())
-                           );
-
+      final matchesSearch = _searchQuery.isEmpty || 
+                           sale.id.toLowerCase().contains(_searchQuery.toLowerCase()) ||
+                           sale.customerName?.toLowerCase().contains(_searchQuery.toLowerCase()) == true;
+      
       final matchesStatus = _statusFilter == null || sale.status == _statusFilter;
       
-      final effectiveStart = (isCashier && _startDate == null) ? DateTime(now.year, now.month, now.day) : _startDate;
-      final effectiveEnd = (isCashier && _endDate == null) ? now : _endDate;
+      final matchesDate = (_startDate == null || sale.timestamp.isAfter(_startDate!)) &&
+                         (_endDate == null || sale.timestamp.isBefore(_endDate!.add(const Duration(days: 1))));
 
-      final matchesDate = (effectiveStart == null || sale.timestamp.isAfter(effectiveStart)) &&
-                         (effectiveEnd == null || sale.timestamp.isBefore(effectiveEnd.add(const Duration(days: 1))));
-      
-      return matchesSearch && matchesStatus && matchesDate;
-    }).toList();
+      final matchesCashier = _cashierFilter == null || sale.cashierName == _cashierFilter;
 
-    final expensesState = ref.watch(expenseProvider);
-    final filteredExpenses = expensesState.records.where((e) {
-      final matchesDate = (_startDate == null || e.date.isAfter(_startDate!)) &&
-                         (_endDate == null || e.date.isBefore(_endDate!.add(const Duration(days: 1))));
-      return matchesDate;
+      final matchesPayment = _paymentMethodFilter == null || 
+                            sale.payments.any((p) => p.method == _paymentMethodFilter);
+
+      final matchesMinTotal = _minTotal == null || sale.totalAmount >= _minTotal!;
+      final matchesMaxTotal = _maxTotal == null || sale.totalAmount <= _maxTotal!;
+
+      return matchesSearch && matchesStatus && matchesDate && matchesCashier && matchesPayment && matchesMinTotal && matchesMaxTotal;
     }).toList();
-    final totalExpenses = filteredExpenses.fold(0.0, (sum, e) => sum + e.amount);
 
     final isDesktop = ResponsiveLayout.isDesktop(context);
     const currentRoute = '/admin/sales';
@@ -102,7 +103,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                   userName: user.name,
                   userRole: user.activePrimaryRole.name.toUpperCase(),
                   currentRoute: currentRoute,
-                  items: MenuService.getMenuItemsForUser(user),
+                  items: ref.watch(menuItemsProvider),
                   onTap: (route) => MenuService.navigate(context, route, currentRoute),
                 ),
               ),
@@ -114,39 +115,25 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                 userName: user.name,
                 userRole: user.activePrimaryRole.name.toUpperCase(),
                 currentRoute: currentRoute,
-                items: MenuService.getMenuItemsForUser(user),
+                items: ref.watch(menuItemsProvider),
                 onTap: (route) => MenuService.navigate(context, route, currentRoute),
               ),
             Expanded(
               child: Column(
                 children: [
-                  Container(
-                    color: theme.cardTheme.color,
-                    child: TabBar(
-                      controller: _tabController,
-                      isScrollable: !isDesktop,
-                      tabAlignment: !isDesktop ? TabAlignment.start : null,
-                      labelColor: theme.colorScheme.primary,
-                      unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
-                      indicatorColor: theme.colorScheme.primary,
-                      tabs: [
-                        Tab(
-                          text: isDesktop ? 'Analytics Overview' : 'Analytics', 
-                          icon: const Icon(Icons.analytics_outlined)
-                        ),
-                        Tab(
-                          text: isDesktop ? 'Transaction Logs' : 'Logs', 
-                          icon: const Icon(Icons.list_alt_rounded)
-                        ),
-                      ],
-                    ),
+                  TabBar(
+                    controller: _tabController,
+                    tabs: const [
+                      Tab(text: 'OVERVIEW', icon: Icon(Icons.analytics_outlined)),
+                      Tab(text: 'TRANSACTIONS', icon: Icon(Icons.history_rounded)),
+                    ],
                   ),
                   Expanded(
                     child: TabBarView(
                       controller: _tabController,
                       children: [
-                        _buildAnalyticsTab(context, filteredSales, totalExpenses),
-                        _buildLogsTab(context, filteredSales, totalExpenses),
+                        _buildOverviewTab(context, filteredSales, expenseState.records),
+                        _buildTransactionsTab(context, filteredSales),
                       ],
                     ),
                   ),
@@ -159,430 +146,204 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     );
   }
 
-  Widget _buildAnalyticsTab(BuildContext context, List<SaleRecord> sales, double totalExpenses) {
+  Widget _buildOverviewTab(BuildContext context, List<SaleRecord> sales, List<dynamic> expenses) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.l),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSummaryCards(context, sales, totalExpenses),
+          _buildSummaryCards(context, sales, expenses),
           const SizedBox(height: AppSpacing.xl),
-          if (sales.isNotEmpty) ...[
-            _buildChartsRow(context, sales),
-            const SizedBox(height: AppSpacing.xl),
-            _buildTopPerformanceRow(context, sales),
-          ] else
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(AppSpacing.xl),
-                child: Text('No data available for the selected period.'),
-              ),
-            ),
+          _buildRevenueChart(context, sales),
         ],
       ),
     );
   }
 
-  Widget _buildLogsTab(BuildContext context, List<SaleRecord> sales, double totalExpenses) {
+  Widget _buildTransactionsTab(BuildContext context, List<SaleRecord> filteredSales) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.l),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeader(context, sales, totalExpenses),
+          _buildHeader(context, filteredSales),
           const SizedBox(height: AppSpacing.xl),
           _buildFilters(),
-          const SizedBox(height: AppSpacing.l),
-          _buildSalesTable(sales),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildChartsRow(BuildContext context, List<SaleRecord> sales) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final isMobile = constraints.maxWidth < 900;
-      if (isMobile) {
-        return Column(
-          children: [
-            _buildRevenueTrendCard(context, sales),
-            const SizedBox(height: AppSpacing.l),
-            _buildCategoryDistributionCard(context, sales),
-          ],
-        );
-      }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(flex: 2, child: _buildRevenueTrendCard(context, sales)),
-          const SizedBox(width: AppSpacing.l),
-          Expanded(flex: 1, child: _buildCategoryDistributionCard(context, sales)),
-        ],
-      );
-    });
-  }
-
-  Widget _buildTopPerformanceRow(BuildContext context, List<SaleRecord> sales) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final isMobile = constraints.maxWidth < 900;
-      if (isMobile) {
-        return Column(
-          children: [
-            _buildTopProductsCard(context, sales),
-            const SizedBox(height: AppSpacing.l),
-            _buildStaffPerformanceCard(context, sales),
-          ],
-        );
-      }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(child: _buildTopProductsCard(context, sales)),
-          const SizedBox(width: AppSpacing.l),
-          Expanded(child: _buildStaffPerformanceCard(context, sales)),
-        ],
-      );
-    });
-  }
-
-  Widget _buildRevenueTrendCard(BuildContext context, List<SaleRecord> sales) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    // Group revenue by date
-    final dailyRevenue = <DateTime, double>{};
-    for (final sale in sales) {
-      if (sale.status == SaleStatus.cancelled) continue;
-      final date = DateTime(sale.timestamp.year, sale.timestamp.month, sale.timestamp.day);
-      dailyRevenue[date] = (dailyRevenue[date] ?? 0.0) + sale.totalAmount;
-    }
-
-    final sortedDates = dailyRevenue.keys.toList()..sort();
-    if (sortedDates.isEmpty) return const SizedBox.shrink();
-
-    final spots = sortedDates.asMap().entries.map((e) {
-      return FlSpot(e.key.toDouble(), dailyRevenue[e.value]!);
-    }).toList();
-
-    return Container(
-      height: 350,
-      padding: const EdgeInsets.all(AppSpacing.l),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(AppRadius.m),
-        border: isDark ? Border.all(color: theme.dividerColor) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Revenue Trend', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
           const SizedBox(height: AppSpacing.xl),
-          Expanded(
-            child: LineChart(
-              LineChartData(
-                gridData: const FlGridData(show: false),
-                titlesData: FlTitlesData(
-                  leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      getTitlesWidget: (val, meta) {
-                        final index = val.toInt();
-                        if (index % (spots.length > 5 ? (spots.length / 5).ceil() : 1) != 0) return const SizedBox.shrink();
-                        if (index >= 0 && index < sortedDates.length) {
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Text(DateFormat('MM/dd').format(sortedDates[index]), style: const TextStyle(fontSize: 10)),
-                          );
-                        }
-                        return const SizedBox.shrink();
-                      },
-                    ),
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    isCurved: true,
-                    color: theme.colorScheme.primary,
-                    barWidth: 3,
-                    isStrokeCapRound: true,
-                    dotData: const FlDotData(show: false),
-                    belowBarData: BarAreaData(
-                      show: true,
-                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCategoryDistributionCard(BuildContext context, List<SaleRecord> sales) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final categoryTotals = <String, double>{};
-    for (final sale in sales) {
-      if (sale.status == SaleStatus.cancelled) continue;
-      for (final item in sale.items) {
-        categoryTotals[item.product.category] = (categoryTotals[item.product.category] ?? 0.0) + item.total;
-      }
-    }
-
-    final sections = categoryTotals.entries.map((e) {
-      final colors = [Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.red, Colors.teal];
-      final index = categoryTotals.keys.toList().indexOf(e.key);
-      return PieChartSectionData(
-        color: colors[index % colors.length],
-        value: e.value,
-        title: '${(e.value / categoryTotals.values.fold(0.0, (a, b) => a + b) * 100).toStringAsFixed(0)}%',
-        radius: 50,
-        titleStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-      );
-    }).toList();
-
-    return Container(
-      height: 350,
-      padding: const EdgeInsets.all(AppSpacing.l),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(AppRadius.m),
-        border: isDark ? Border.all(color: theme.dividerColor) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Category Mix', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
-          Expanded(
-            child: PieChart(
-              PieChartData(
-                sections: sections,
-                sectionsSpace: 2,
-                centerSpaceRadius: 40,
-              ),
-            ),
-          ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: categoryTotals.keys.map((cat) {
-              final index = categoryTotals.keys.toList().indexOf(cat);
-              final colors = [Colors.blue, Colors.green, Colors.orange, Colors.purple, Colors.red, Colors.teal];
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(width: 8, height: 8, color: colors[index % colors.length]),
-                  const SizedBox(width: 4),
-                  Text(cat, style: const TextStyle(fontSize: 10)),
-                ],
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTopProductsCard(BuildContext context, List<SaleRecord> sales) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final productStats = <String, Map<String, dynamic>>{};
-    for (final sale in sales) {
-      if (sale.status == SaleStatus.cancelled) continue;
-      for (final item in sale.items) {
-        final name = item.product.name;
-        productStats.putIfAbsent(name, () => {'revenue': 0.0, 'weight': 0.0});
-        productStats[name]!['revenue'] += item.total;
-        productStats[name]!['weight'] += item.quantity;
-      }
-    }
-
-    final sortedProducts = productStats.entries.toList()..sort((a, b) => b.value['revenue'].compareTo(a.value['revenue']));
-    final top5 = sortedProducts.take(5).toList();
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.l),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(AppRadius.m),
-        border: isDark ? Border.all(color: theme.dividerColor) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Top Selling Products', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
-          const SizedBox(height: AppSpacing.m),
-          ...top5.map((e) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8.0),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: theme.colorScheme.primary.withValues(alpha: 0.1), shape: BoxShape.circle),
-                  child: Text('${top5.indexOf(e) + 1}', style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12)),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(e.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                      Text('${WeightConverter.formatShort(e.value['weight'])} sold', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
-                    ],
-                  ),
-                ),
-                Text('₵${e.value['revenue'].toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              ],
-            ),
-          )),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStaffPerformanceCard(BuildContext context, List<SaleRecord> sales) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    final staffStats = <String, Map<String, dynamic>>{};
-    for (final sale in sales) {
-      if (sale.status == SaleStatus.cancelled) continue;
-      final name = sale.cashierName;
-      staffStats.putIfAbsent(name, () => {'revenue': 0.0, 'count': 0});
-      staffStats[name]!['revenue'] += sale.totalAmount;
-      staffStats[name]!['count'] += 1;
-    }
-
-    final sortedStaff = staffStats.entries.toList()..sort((a, b) => b.value['revenue'].compareTo(a.value['revenue']));
-
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.l),
-      decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(AppRadius.m),
-        border: isDark ? Border.all(color: theme.dividerColor) : null,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Cashier Performance', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: theme.colorScheme.onSurface)),
-          const SizedBox(height: AppSpacing.m),
-          if (sortedStaff.isEmpty)
-             const Text('No data available', style: TextStyle(fontSize: 12))
-          else
-            ...sortedStaff.map((e) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: theme.colorScheme.primary.withValues(alpha: 0.1),
-                    child: Text(e.key.substring(0, 1).toUpperCase(), style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.bold, fontSize: 12)),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(e.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        Text('${e.value['count']} transactions', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
-                      ],
-                    ),
-                  ),
-                  Text('₵${e.value['revenue'].toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                ],
-              ),
-            )),
+          _buildSalesTable(filteredSales),
         ],
       ),
     );
   }
 
   Widget _buildFilters() {
+    final staff = ref.watch(userProvider);
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.m),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            return Wrap(
-              spacing: AppSpacing.m,
-              runSpacing: AppSpacing.m,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            return Column(
               children: [
-                SizedBox(
-                  width: constraints.maxWidth < 600 ? constraints.maxWidth : 250,
-                  child: TextField(
-                    onChanged: (v) => setState(() => _searchQuery = v),
-                    decoration: InputDecoration(
-                      hintText: 'Search Receipt ID...',
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
-                      isDense: true,
+                Wrap(
+                  spacing: AppSpacing.m,
+                  runSpacing: AppSpacing.m,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    // Search: Receipt ID / Customer
+                    SizedBox(
+                      width: constraints.maxWidth < 600 ? constraints.maxWidth : 220,
+                      child: TextField(
+                        onChanged: (v) => setState(() => _searchQuery = v),
+                        decoration: InputDecoration(
+                          hintText: 'Invoice / Customer...',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                          isDense: true,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                SizedBox(
-                  width: constraints.maxWidth < 600 ? constraints.maxWidth : 220,
-                  child: DropdownButtonFormField<SaleStatus>(
-                    initialValue: _statusFilter,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Status',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                    
+                    // Sold By (Staff)
+                    SizedBox(
+                      width: constraints.maxWidth < 600 ? constraints.maxWidth : 180,
+                      child: DropdownButtonFormField<String>(
+                        value: _cashierFilter,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Sold By', border: OutlineInputBorder(), isDense: true),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('All Staff')),
+                          ...staff.map((u) => DropdownMenuItem(value: u.name, child: Text(u.name, overflow: TextOverflow.ellipsis))),
+                        ],
+                        onChanged: (v) => setState(() => _cashierFilter = v),
+                      ),
                     ),
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('All Status')),
-                      ...SaleStatus.values.map((s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(
-                              s.name.replaceAll(RegExp(r'(?=[A-Z])'), ' ').toUpperCase(),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          )),
-                    ],
-                    onChanged: (v) => setState(() => _statusFilter = v),
-                  ),
+
+                    // Payment Method
+                    SizedBox(
+                      width: constraints.maxWidth < 600 ? constraints.maxWidth : 160,
+                      child: DropdownButtonFormField<PaymentMethod>(
+                        value: _paymentMethodFilter,
+                        isExpanded: true,
+                        decoration: const InputDecoration(labelText: 'Payment', border: OutlineInputBorder(), isDense: true),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('All Methods')),
+                          ...PaymentMethod.values.map((m) => DropdownMenuItem(value: m, child: Text(m.name.toUpperCase()))),
+                        ],
+                        onChanged: (v) => setState(() => _paymentMethodFilter = v),
+                      ),
+                    ),
+
+                    // Status
+                    SizedBox(
+                      width: constraints.maxWidth < 600 ? constraints.maxWidth : 160,
+                      child: DropdownButtonFormField<SaleStatus>(
+                        initialValue: _statusFilter,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Status',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('All Status')),
+                          ...SaleStatus.values.map((s) => DropdownMenuItem(
+                                value: s,
+                                child: Text(
+                                  s.name.replaceAll(RegExp(r'(?=[A-Z])'), ' ').toUpperCase(),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              )),
+                        ],
+                        onChanged: (v) => setState(() => _statusFilter = v),
+                      ),
+                    ),
+
+                    // Date
+                    TextButton.icon(
+                      onPressed: () async {
+                        final picked = await showDateRangePicker(
+                          context: context,
+                          firstDate: DateTime(2023),
+                          lastDate: DateTime.now(),
+                        );
+                        if (picked != null) {
+                          setState(() {
+                            _startDate = picked.start;
+                            _endDate = picked.end;
+                          });
+                        }
+                      },
+                      icon: const Icon(Icons.date_range),
+                      label: Text(_startDate == null
+                          ? 'Filter Date'
+                          : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}'),
+                    ),
+
+                    if (_startDate != null || _statusFilter != null || _searchQuery.isNotEmpty || _cashierFilter != null || _paymentMethodFilter != null || _minTotal != null || _maxTotal != null)
+                      IconButton(
+                        onPressed: () => setState(() {
+                          _startDate = null;
+                          _endDate = null;
+                          _statusFilter = null;
+                          _searchQuery = '';
+                          _cashierFilter = null;
+                          _paymentMethodFilter = null;
+                          _minTotal = null;
+                          _maxTotal = null;
+                        }),
+                        icon: const Icon(Icons.clear_all, color: Colors.red),
+                        tooltip: 'Clear All Filters',
+                      ),
+                  ],
                 ),
-                TextButton.icon(
-                  onPressed: () async {
-                    final picked = await showDateRangePicker(
-                      context: context,
-                      firstDate: DateTime(2023),
-                      lastDate: DateTime.now(),
-                    );
-                    if (picked != null) {
-                      setState(() {
-                        _startDate = picked.start;
-                        _endDate = picked.end;
-                      });
-                    }
-                  },
-                  icon: const Icon(Icons.date_range),
-                  label: Text(_startDate == null
-                      ? 'Filter Date'
-                      : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}'),
+                
+                const SizedBox(height: 12),
+                const Divider(),
+                const SizedBox(height: 8),
+
+                // Amount Range Filter
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: AppSpacing.m,
+                  runSpacing: AppSpacing.s,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.payments_outlined, size: 16, color: Colors.grey),
+                        const SizedBox(width: 8),
+                        const Text('Amount Range (GHS):', style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: constraints.maxWidth < 600 ? (constraints.maxWidth - 40) / 2 : 100,
+                          child: TextField(
+                            decoration: const InputDecoration(hintText: 'Min', isDense: true, border: UnderlineInputBorder()),
+                            keyboardType: TextInputType.number,
+                            onChanged: (v) => setState(() => _minTotal = double.tryParse(v)),
+                          ),
+                        ),
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8.0),
+                          child: Text('-', style: TextStyle(color: Colors.grey)),
+                        ),
+                        SizedBox(
+                          width: constraints.maxWidth < 600 ? (constraints.maxWidth - 40) / 2 : 100,
+                          child: TextField(
+                            decoration: const InputDecoration(hintText: 'Max', isDense: true, border: UnderlineInputBorder()),
+                            keyboardType: TextInputType.number,
+                            onChanged: (v) => setState(() => _maxTotal = double.tryParse(v)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                if (_startDate != null || _statusFilter != null || _searchQuery.isNotEmpty)
-                  IconButton(
-                    onPressed: () => setState(() {
-                      _startDate = null;
-                      _endDate = null;
-                      _statusFilter = null;
-                      _searchQuery = '';
-                    }),
-                    icon: const Icon(Icons.clear_all),
-                    tooltip: 'Clear Filters',
-                  ),
               ],
             );
           },
@@ -591,32 +352,28 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     );
   }
 
-  Widget _buildHeader(BuildContext context, List<SaleRecord> filteredSales, double totalExpenses) {
+  Widget _buildHeader(BuildContext context, List<SaleRecord> filteredSales) {
     final theme = Theme.of(context);
     return LayoutBuilder(builder: (context, constraints) {
       final isMobile = constraints.maxWidth < 600;
       
-      final headerContent = Column(
+      final headerText = Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
             'Transaction History',
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
           ),
           Text(
             'Detailed breakdown of all shop revenue (${filteredSales.length} items)',
             style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12),
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
           ),
         ],
       );
 
       final exportButton = ElevatedButton.icon(
-        onPressed: () => ReceiptService.printSalesReport(filteredSales, totalExpenses: totalExpenses),
+        onPressed: () => ReceiptService.printSalesReport(filteredSales),
         icon: const Icon(Icons.picture_as_pdf),
         label: const Text('Export to PDF'),
         style: ElevatedButton.styleFrom(
@@ -649,36 +406,21 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
           )
         : null;
 
-      final deleteSelectedButton = _selectedSaleIds.isNotEmpty
-        ? ElevatedButton.icon(
-            onPressed: _isDeletingSelected ? null : () => _confirmDeleteSelected(context),
-            icon: _isDeletingSelected
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.delete_outline),
-            label: Text('Delete (${_selectedSaleIds.length})'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade800,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-            ),
-          )
-        : null;
-
       if (isMobile) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            headerContent,
+            headerText,
             const SizedBox(height: AppSpacing.m),
-            if (deleteSelectedButton != null) ...[
-              SizedBox(width: double.infinity, child: deleteSelectedButton),
-              const SizedBox(height: AppSpacing.s),
-            ],
-            if (printSelectedButton != null) ...[
-              SizedBox(width: double.infinity, child: printSelectedButton),
-              const SizedBox(height: AppSpacing.s),
-            ],
-            SizedBox(width: double.infinity, child: exportButton),
+            Row(
+              children: [
+                Expanded(child: exportButton),
+                if (printSelectedButton != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(child: printSelectedButton),
+                ],
+              ],
+            ),
           ],
         );
       }
@@ -686,15 +428,11 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
       return Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Expanded(child: headerContent),
+          Expanded(child: headerText),
           const SizedBox(width: 16),
-          if (deleteSelectedButton != null) ...[
-            deleteSelectedButton,
-            const SizedBox(width: 8),
-          ],
           if (printSelectedButton != null) ...[
             printSelectedButton,
-            const SizedBox(width: 8),
+            const SizedBox(width: 12),
           ],
           exportButton,
         ],
@@ -702,25 +440,33 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     });
   }
 
-  Widget _buildSummaryCards(BuildContext context, List<SaleRecord> sales, double totalExpenses) {
-    final activeSales = sales.where((s) => s.status != SaleStatus.cancelled).toList();
-    final totalRevenue = activeSales.fold(0.0, (sum, sale) => sum + sale.totalAmount);
+  Widget _buildSummaryCards(BuildContext context, List<SaleRecord> sales, List<dynamic> expenses) {
+    final totalRevenue = sales.where((s) => s.isActive).fold(0.0, (sum, sale) => sum + sale.totalAmount);
+    final totalExpenses = expenses.fold(0.0, (sum, e) => sum + (e.amount as double));
     final netProfit = totalRevenue - totalExpenses;
 
     return LayoutBuilder(builder: (context, constraints) {
-      final double width = constraints.maxWidth;
-      // 1 column on small phones, 3 columns on desktop/tablets
-      final int crossAxisCount = width > 600 ? 3 : 1;
-      final double spacing = AppSpacing.m;
-      final double itemWidth = (width - (spacing * (crossAxisCount - 1))) / crossAxisCount;
-
-      return Wrap(
-        spacing: spacing,
-        runSpacing: spacing,
+      final bool useColumn = constraints.maxWidth < 900;
+      
+      if (useColumn) {
+        return Column(
+          children: [
+            _reportCard(context, 'Gross Volume', '₵ ${totalRevenue.toStringAsFixed(2)}', Icons.payments, Colors.blue),
+            const SizedBox(height: AppSpacing.m),
+            _reportCard(context, 'Total Expenses', '₵ ${totalExpenses.toStringAsFixed(2)}', Icons.trending_down, Colors.red),
+            const SizedBox(height: AppSpacing.m),
+            _reportCard(context, 'Net Profit', '₵ ${netProfit.toStringAsFixed(2)}', Icons.account_balance_wallet, Colors.green),
+          ],
+        );
+      }
+      
+      return Row(
         children: [
-          SizedBox(width: itemWidth, child: _reportCard(context, 'Gross Volume', '₵ ${totalRevenue.toStringAsFixed(2)}', Icons.payments, Colors.blue)),
-          SizedBox(width: itemWidth, child: _reportCard(context, 'Total Expenses', '₵ ${totalExpenses.toStringAsFixed(2)}', Icons.trending_down, Colors.red)),
-          SizedBox(width: itemWidth, child: _reportCard(context, 'Net Profit', '₵ ${netProfit.toStringAsFixed(2)}', Icons.account_balance_wallet, Colors.green)),
+          Expanded(child: _reportCard(context, 'Gross Volume', '₵ ${totalRevenue.toStringAsFixed(2)}', Icons.payments, Colors.blue)),
+          const SizedBox(width: AppSpacing.m),
+          Expanded(child: _reportCard(context, 'Total Expenses', '₵ ${totalExpenses.toStringAsFixed(2)}', Icons.trending_down, Colors.red)),
+          const SizedBox(width: AppSpacing.m),
+          Expanded(child: _reportCard(context, 'Net Profit', '₵ ${netProfit.toStringAsFixed(2)}', Icons.account_balance_wallet, Colors.green)),
         ],
       );
     });
@@ -736,42 +482,111 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
         color: theme.cardTheme.color,
         borderRadius: BorderRadius.circular(AppRadius.m),
         boxShadow: [
-          if (!isDark) BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 4))
+          if (!isDark) BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10)
         ],
-        border: Border.all(color: isDark ? theme.dividerColor : Colors.grey.shade200),
+        border: isDark ? Border.all(color: theme.dividerColor) : null,
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(AppRadius.s),
-            ),
-            child: Icon(icon, color: color, size: 24),
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: AppSpacing.m),
+          Text(
+            title,
+            style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 11),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(width: AppSpacing.m),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRevenueChart(BuildContext context, List<SaleRecord> sales) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    // Last 7 days data
+    final now = DateTime.now();
+    final List<double> dailyRevenue = List.filled(7, 0.0);
+    final List<String> labels = [];
+
+    for (int i = 0; i < 7; i++) {
+      final date = now.subtract(Duration(days: 6 - i));
+      labels.add(DateFormat('E').format(date));
+      
+      final daySales = sales.where((s) => 
+        s.timestamp.day == date.day && 
+        s.timestamp.month == date.month && 
+        s.timestamp.year == date.year &&
+        s.isActive
+      );
+      
+      dailyRevenue[i] = daySales.fold(0.0, (sum, s) => sum + s.totalAmount);
+    }
+
+    double maxRevenue = dailyRevenue.reduce((a, b) => a > b ? a : b);
+    if (maxRevenue == 0) maxRevenue = 1000;
+
+    return Container(
+      height: 300,
+      padding: const EdgeInsets.all(AppSpacing.l),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        border: isDark ? Border.all(color: theme.dividerColor) : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Weekly Revenue Trend', style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface)),
+          const SizedBox(height: AppSpacing.xl),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  title.toUpperCase(),
-                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 0.5),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+            child: LineChart(
+              LineChartData(
+                gridData: const FlGridData(show: false),
+                titlesData: FlTitlesData(
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (val, meta) => Text(labels[val.toInt()], style: const TextStyle(fontSize: 10)),
+                    ),
+                  ),
+                  leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
                 ),
-                const SizedBox(height: 4),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: List.generate(7, (i) => FlSpot(i.toDouble(), dailyRevenue[i])),
+                    isCurved: true,
+                    color: theme.colorScheme.primary,
+                    barWidth: 3,
+                    dotData: const FlDotData(show: false),
+                    belowBarData: BarAreaData(
+                      show: true,
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                    ),
+                  ),
+                ],
+                lineTouchData: LineTouchData(
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (spot) => theme.colorScheme.surface,
+                    getTooltipItems: (spots) => spots.map((s) => LineTooltipItem('₵${s.y.toStringAsFixed(2)}', TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.bold))).toList(),
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ],
@@ -781,254 +596,188 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
 
   Widget _buildSalesTable(List<SaleRecord> sales) {
     final theme = Theme.of(context);
-    final user = ref.read(currentUserProvider);
-    if (user == null) return const SizedBox.shrink();
     final isDark = theme.brightness == Brightness.dark;
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final bool isMobile = constraints.maxWidth < 600;
-
-        if (isMobile) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.m),
-                child: Text('Transactions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface)),
-              ),
-              if (sales.isEmpty)
-                const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.xl), child: Text('No transactions found.')))
-              else
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: sales.length,
-                  itemBuilder: (context, index) {
-                    final sale = sales[index];
-                    final isDebt = sale.balance > 0.01;
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: AppSpacing.m),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.m),
-                        side: isDebt ? const BorderSide(color: Colors.red, width: 1) : BorderSide.none,
-                      ),
-                      child: ListTile(
-                        onTap: () => _showSaleDetails(context, sale),
-                        leading: CircleAvatar(
-                          backgroundColor: _getStatusColor(sale.status).withValues(alpha: 0.1),
-                          child: Icon(Icons.receipt_long, color: _getStatusColor(sale.status), size: 20),
-                        ),
-                        title: Text(sale.id, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(DateFormat('MMM dd, HH:mm').format(sale.timestamp), style: const TextStyle(fontSize: 10)),
-                            Text('Cust: ${sale.customerName ?? "Walk-in"}', style: const TextStyle(fontSize: 11)),
-                          ],
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text('₵${sale.totalAmount.toStringAsFixed(2)}', 
-                              style: TextStyle(fontWeight: FontWeight.bold, color: isDebt ? Colors.red : null)),
-                            if (isDebt)
-                              const Text('DEBT', style: TextStyle(color: Colors.red, fontSize: 8, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-            ],
-          );
+    // Apply Sorting
+    if (_sortColumnIndex != null) {
+      sales.sort((a, b) {
+        int result = 0;
+        switch (_sortColumnIndex) {
+          case 0: result = a.id.compareTo(b.id); break;
+          case 1: result = a.timestamp.compareTo(b.timestamp); break;
+          case 2: result = (a.customerName ?? '').compareTo(b.customerName ?? ''); break;
+          case 3: result = a.cashierName.compareTo(b.cashierName); break;
+          case 4: result = a.totalAmount.compareTo(b.totalAmount); break;
+          case 5: 
+            final aMethods = a.payments.map((p) => p.method.name).join(', ');
+            final bMethods = b.payments.map((p) => p.method.name).join(', ');
+            result = aMethods.compareTo(bMethods); 
+            break;
+          case 6: result = a.status.name.compareTo(b.status.name); break;
         }
+        return _sortAscending ? result : -result;
+      });
+    }
 
-        return Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: theme.cardTheme.color,
-            borderRadius: BorderRadius.circular(AppRadius.m),
-            boxShadow: [
-              if (!isDark) BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10)
-            ],
-            border: isDark ? Border.all(color: theme.dividerColor) : null,
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        boxShadow: [
+          if (!isDark) BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10)
+        ],
+        border: isDark ? Border.all(color: theme.dividerColor) : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.l),
+            child: Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppSpacing.m,
+              runSpacing: AppSpacing.s,
+              children: [
+                Text('Transactions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface)),
+                if (_selectedSaleIds.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: _isDeletingSelected ? null : () => _confirmDeleteSelected(),
+                    icon: const Icon(Icons.delete_outline, color: Colors.red),
+                    label: Text('Delete Selected (${_selectedSaleIds.length})', style: const TextStyle(color: Colors.red)),
+                  ),
+              ],
+            ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(AppSpacing.l),
-                child: Text('Transactions', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: theme.colorScheme.onSurface)),
-              ),
-              if (sales.isEmpty)
-                const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.xl), child: Text('No transactions found.')))
-              else
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 800),
-                    child: DataTable(
-                      columnSpacing: 24,
-                      horizontalMargin: 12,
-                      showCheckboxColumn: true,
-                      onSelectAll: (selected) {
-                        setState(() {
-                          if (selected == true) {
-                            _selectedSaleIds.addAll(sales.map((s) => s.id));
-                          } else {
-                            _selectedSaleIds.clear();
-                          }
-                        });
-                      },
-                      headingTextStyle: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary, fontSize: 12),
-                      columns: const [
-                        DataColumn(label: Text('Invoice ID')),
-                        DataColumn(label: Text('Date & Time')),
-                        DataColumn(label: Text('Customer')),
-                        DataColumn(label: Text('Sold By')),
-                        DataColumn(label: Text('Total')),
-                        DataColumn(label: Text('Status')),
-                      ],
-                      rows: sales.map<DataRow>((sale) {
-                        final isSelected = _selectedSaleIds.contains(sale.id);
-                        final isDebt = sale.balance > 0.01;
-                        return DataRow(
-                          selected: isSelected,
-                          color: WidgetStateProperty.resolveWith<Color?>((states) {
-                            if (isDebt && !isSelected) return Colors.red.withValues(alpha: 0.03);
-                            return null;
-                          }),
-                          onSelectChanged: (selected) {
-                            setState(() {
-                              if (selected == true) {
-                                _selectedSaleIds.add(sale.id);
-                              } else {
-                                _selectedSaleIds.remove(sale.id);
-                              }
-                            });
-                          },
-                          onLongPress: () => _showSaleDetails(context, sale),
-                          cells: [
-                            DataCell(
-                              InkWell(
-                                onTap: () => _showSaleDetails(context, sale),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (sale.isVerified)
-                                       const Icon(Icons.verified, color: Colors.blue, size: 14),
-                                    if (sale.isVerified)
-                                       const SizedBox(width: 4),
-                                    Text(sale.id, style: TextStyle(
-                                      fontWeight: FontWeight.bold, 
-                                      decoration: TextDecoration.underline,
-                                      color: isDebt ? Colors.red.shade900 : null,
-                                    )),
-                                  ],
+          if (sales.isEmpty)
+            const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.xl), child: Text('No transactions found.')))
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minWidth: 900),
+                child: DataTable(
+                  columnSpacing: 24,
+                  horizontalMargin: 12,
+                  showCheckboxColumn: true,
+                  sortColumnIndex: _sortColumnIndex,
+                  sortAscending: _sortAscending,
+                  headingTextStyle: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.primary, fontSize: 12),
+                  columns: [
+                    DataColumn(label: const Text('Invoice ID'), onSort: (idx, asc) => setState(() { _sortColumnIndex = idx; _sortAscending = asc; })),
+                    DataColumn(label: const Text('Date'), onSort: (idx, asc) => setState(() { _sortColumnIndex = idx; _sortAscending = asc; })),
+                    DataColumn(label: const Text('Customer'), onSort: (idx, asc) => setState(() { _sortColumnIndex = idx; _sortAscending = asc; })),
+                    DataColumn(label: const Text('Sold By'), onSort: (idx, asc) => setState(() { _sortColumnIndex = idx; _sortAscending = asc; })),
+                    DataColumn(label: const Text('Total'), onSort: (idx, asc) => setState(() { _sortColumnIndex = idx; _sortAscending = asc; })),
+                    DataColumn(label: const Text('Payment'), onSort: (idx, asc) => setState(() { _sortColumnIndex = idx; _sortAscending = asc; })),
+                    DataColumn(label: const Text('Status'), onSort: (idx, asc) => setState(() { _sortColumnIndex = idx; _sortAscending = asc; })),
+                  ],
+                  rows: sales.map<DataRow>((sale) {
+                    final isSelected = _selectedSaleIds.contains(sale.id);
+                    final paymentMethods = sale.payments.map((p) {
+                      switch (p.method) {
+                        case PaymentMethod.cash: return 'CASH';
+                        case PaymentMethod.mobileMoney: return 'MOMO';
+                        case PaymentMethod.bankDeposit: return 'BANK';
+                      }
+                    }).toSet().join(', ');
+
+                    return DataRow(
+                      selected: isSelected,
+                      onSelectChanged: (val) {
+                      setState(() {
+                        if (val == true) {
+                          _selectedSaleIds.add(sale.id);
+                        } else {
+                          _selectedSaleIds.remove(sale.id);
+                        }
+                      });
+                    },
+                      onLongPress: () => _showSaleDetails(context, sale),
+                      cells: [
+                        DataCell(
+                          InkWell(
+                            onTap: () => _showSaleDetails(context, sale),
+                            child: Text(sale.id, style: const TextStyle(fontWeight: FontWeight.bold, decoration: TextDecoration.underline)),
+                          )
+                        ),
+                        DataCell(Text(DateFormat('MMM dd, HH:mm').format(sale.timestamp))),
+                        DataCell(
+                          SizedBox(
+                            width: 100,
+                            child: Text(
+                              sale.customerName ?? 'Walk-in',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          SizedBox(
+                            width: 100,
+                            child: Text(
+                              sale.cashierName,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ),
+                        ),
+                        DataCell(Text('₵ ${sale.totalAmount.toStringAsFixed(2)}')),
+                        DataCell(
+                          Text(paymentMethods, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueGrey)),
+                        ),
+                        DataCell(Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _getStatusColor(sale.status).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                sale.status.name.toUpperCase(),
+                                style: TextStyle(
+                                  color: _getStatusColor(sale.status),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
-                            ),
-                            DataCell(Text(DateFormat('MMM dd, HH:mm:ss').format(sale.timestamp), 
-                              style: TextStyle(color: isDebt ? Colors.red.shade900 : null))),
-                            DataCell(
-                              SizedBox(
-                                width: 100,
-                                child: Text(
-                                  sale.customerName ?? 'Walk-in',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: isDebt ? Colors.red.shade900 : null,
-                                    fontWeight: isDebt ? FontWeight.bold : FontWeight.normal,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              SizedBox(
-                                width: 100,
-                                child: Text(
-                                  sale.cashierName,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(fontSize: 12, color: isDebt ? Colors.red.shade900 : null),
-                                ),
-                              ),
-                            ),
-                            DataCell(
-                              Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('₵ ${sale.totalAmount.toStringAsFixed(2)}', 
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold, 
-                                      color: isDebt ? Colors.red : null
-                                    )
-                                  ),
-                                  if (isDebt)
-                                    Text('Balance: ₵${sale.balance.toStringAsFixed(2)}', 
-                                      style: const TextStyle(fontSize: 9, color: Colors.red, fontWeight: FontWeight.bold)
-                                    ),
-                                ],
-                              )
-                            ),
-                            DataCell(Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
+                              if (sale.balance > 0.01) ...[
+                                const SizedBox(width: 4),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  padding: const EdgeInsets.all(2),
                                   decoration: BoxDecoration(
-                                    color: _getStatusColor(sale.status).withValues(alpha: 0.1),
+                                    color: Colors.red,
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: Text(
-                                    sale.status.name.toUpperCase(),
-                                    style: TextStyle(
-                                      color: _getStatusColor(sale.status),
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                    ),
+                                  child: const Text(
+                                    'DEBT',
+                                    style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
                                   ),
                                 ),
-                                if (isDebt) ...[
-                                  const SizedBox(width: 4),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: const Text(
-                                      'DEBT',
-                                      style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                ],
                               ],
-                            )),
-                          ],
-                        );
-                      }).toList(),
-                    ),
-                  ),
+                            ],
+                          )),
+                        ),
+                      ],
+                    );
+                  }).toList(),
                 ),
-            ],
-          ),
-        );
-      },
+              ),
+            ),
+        ],
+      ),
     );
   }
 
   void _showSaleDetails(BuildContext context, SaleRecord sale) {
-    final user = ref.read(currentUserProvider);
-    if (user == null) return;
-    bool isPrinting = false;
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      barrierDismissible: false, // Prevent accidental dismissal during sub-actions
+      builder: (detailsContext) => StatefulBuilder(
         builder: (context, setState) {
-          final theme = Theme.of(context);
+          final theme = Theme.of(detailsContext);
           
           return Dialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
@@ -1045,29 +794,26 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.l)),
                     ),
                     child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Icon(Icons.receipt_long, color: Colors.white),
-                        const SizedBox(width: AppSpacing.m),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
+                          child: Row(
                             children: [
-                              const Text(
-                                'Transaction Details',
-                                style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
-                              Text(
-                                sale.id,
-                                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                                overflow: TextOverflow.ellipsis,
+                              const Icon(Icons.receipt_long, color: Colors.white),
+                              const SizedBox(width: AppSpacing.m),
+                              Expanded(
+                                child: Text(
+                                  'Transaction ${sale.id}',
+                                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
                           icon: const Icon(Icons.close, color: Colors.white70),
-                          onPressed: () => Navigator.pop(context),
+                          onPressed: () => Navigator.of(detailsContext).pop(),
                         ),
                       ],
                     ),
@@ -1086,13 +832,10 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text('CASHIER', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                                    Text(sale.cashierName, 
-                                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                                      maxLines: 1,
+                                    Text('${sale.cashierName} (${sale.cashierId})', 
+                                      style: const TextStyle(fontSize: 13),
+                                      maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
-                                    ),
-                                    Text('ID: ${sale.cashierId.substring(0, 8).toUpperCase()}', 
-                                      style: TextStyle(fontSize: 9, color: theme.colorScheme.onSurfaceVariant),
                                     ),
                                   ],
                                 ),
@@ -1102,8 +845,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   Text('DATE', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                                  Text(DateFormat('MMM dd').format(sale.timestamp), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                                  Text(DateFormat('HH:mm').format(sale.timestamp), style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant)),
+                                  Text(DateFormat('MMM dd, HH:mm').format(sale.timestamp), style: const TextStyle(fontSize: 13)),
                                 ],
                               ),
                             ],
@@ -1126,7 +868,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                 const SizedBox(width: 8),
                                 Expanded(
                                   flex: 2,
-                                  child: Text('${WeightConverter.formatShort(item.quantity)} x ₵${item.priceAtSale.toStringAsFixed(2)}', 
+                                  child: Text('${WeightConverter.formatShort(item.quantity, unit: item.product.unit)} x ₵${item.priceAtSale.toStringAsFixed(2)}', 
                                     textAlign: TextAlign.right,
                                     style: TextStyle(fontSize: 11, color: theme.colorScheme.onSurfaceVariant),
                                   ),
@@ -1139,11 +881,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                             ),
                           )),
                           const Divider(height: 32),
-                          _detailRow(context, 'NET INVOICE VALUE', '₵${sale.netInvoiceValue.toStringAsFixed(2)}', 
-                            isBold: true, color: sale.balance > 0.01 ? Colors.red : theme.colorScheme.primary),
-                          if (sale.balance > 0.01)
-                            _detailRow(context, 'OUTSTANDING BALANCE', '₵${sale.balance.toStringAsFixed(2)}', 
-                              isBold: true, color: Colors.red),
+                          _detailRow(detailsContext, 'NET INVOICE VALUE', '₵${sale.netInvoiceValue.toStringAsFixed(2)}', isBold: true, color: theme.colorScheme.primary),
                           const Divider(height: 32),
                           Text('PAYMENTS', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
@@ -1157,50 +895,6 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                               ],
                             ),
                           )),
-                          if (sale.bankReceiptUrl != null) ...[
-                            const Divider(height: 32),
-                            Text('BANK DEPOSIT SLIP', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                            if (sale.bankReceiptId != null)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: Text('Reference ID: ${sale.bankReceiptId}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purple)),
-                              ),
-                            const SizedBox(height: 8),
-                            InkWell(
-                              onTap: () => showDialog(
-                                context: context,
-                                builder: (context) => Dialog(
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      AppBar(
-                                        title: Text(sale.bankReceiptId ?? 'Deposit Slip', style: const TextStyle(fontSize: 14)),
-                                        backgroundColor: Colors.purple,
-                                        foregroundColor: Colors.white,
-                                        leading: IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
-                                      ),
-                                      Flexible(child: Image.network(sale.bankReceiptUrl!)),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              child: Container(
-                                height: 100,
-                                width: double.infinity,
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: theme.dividerColor),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.network(sale.bankReceiptUrl!, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Center(child: Text('Image Error'))),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            const Center(child: Text('Tap to enlarge', style: TextStyle(fontSize: 9, fontStyle: FontStyle.italic))),
-                          ],
                         ],
                       ),
                     ),
@@ -1210,59 +904,47 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     decoration: BoxDecoration(
                       border: Border(top: BorderSide(color: theme.dividerColor)),
                     ),
-                    child: OverflowBar(
-                      alignment: MainAxisAlignment.end,
-                      spacing: 8,
-                      overflowSpacing: 8,
+                    child: Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: AppSpacing.s,
+                      runSpacing: AppSpacing.s,
                       children: [
-                        if (!sale.isVerified && (user.activePrimaryRole == UserRole.cashier || user.activePrimaryRole == UserRole.admin || user.activePrimaryRole == UserRole.superAdmin))
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              ref.read(saleHistoryProvider.notifier).verifySale(sale.id);
-                              Navigator.pop(context);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Transaction Verified. Inventory updated.'), backgroundColor: Colors.green),
-                              );
-                            },
-                            icon: const Icon(Icons.check_circle_outline, size: 16),
-                            label: const Text('VERIFY', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              minimumSize: Size.zero,
-                            ),
-                          ),
-                        if (sale.status != SaleStatus.cancelled)
+                        if (sale.status != SaleStatus.cancelled && sale.status != SaleStatus.reversed)
                           TextButton.icon(
                             onPressed: () {
-                              Navigator.pop(context); // Close details
+                              Navigator.of(detailsContext).pop();
                               _showEditSaleDialog(context, sale);
                             },
-                            icon: const Icon(Icons.edit_note, color: Colors.blue, size: 16),
-                            label: const Text('Edit Receipt', style: TextStyle(color: Colors.blue, fontSize: 11)),
+                            icon: const Icon(Icons.edit_note, color: Colors.blue),
+                            label: const Text('Edit Receipt', style: TextStyle(color: Colors.blue)),
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        
+                        // NEW: Reverse Transaction Button
+                        if (sale.status != SaleStatus.reversed)
+                          TextButton.icon(
+                            onPressed: () => _confirmReverseTransaction(detailsContext, sale),
+                            icon: const Icon(Icons.history_rounded, color: Colors.red),
+                            label: const Text('Reverse Transaction', style: TextStyle(color: Colors.red)),
                           ),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context), 
-                          child: const Text('Close', style: TextStyle(fontSize: 12))
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: isPrinting ? null : () async {
-                            setState(() => isPrinting = true);
-                            await ReceiptService.printReceipt(sale);
-                            setState(() => isPrinting = false);
-                          },
-                          icon: isPrinting 
-                            ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.print, size: 14),
-                          label: const Text('REPRINT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: theme.colorScheme.primary, 
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
+
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextButton(onPressed: () => Navigator.of(detailsContext).pop(), child: const Text('Close')),
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.of(detailsContext).pop();
+                                _showReceiptOptionsDialog(context, sale, ref);
+                              },
+                              icon: const Icon(Icons.more_vert, size: 18),
+                              label: const Text('Options'),
+                              style: ElevatedButton.styleFrom(backgroundColor: theme.colorScheme.primary, foregroundColor: Colors.white),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1276,17 +958,111 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     );
   }
 
-  Widget _detailRow(BuildContext context, String label, String value, {bool isBold = false, Color? color}) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
-          Text(value, style: TextStyle(fontSize: 12, fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: color ?? theme.colorScheme.onSurface)),
-        ],
+  void _showReceiptOptionsDialog(BuildContext context, SaleRecord sale, WidgetRef ref) {
+    final currentBranch = ref.read(currentBranchProvider);
+    bool isProcessing = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+          title: const Row(
+            children: [
+              Icon(Icons.receipt_long_rounded, color: AppColors.primaryMaroon),
+              SizedBox(width: 12),
+              Text('RECEIPT OPTIONS', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0, fontSize: 16)),
+            ],
+          ),
+          content: isProcessing 
+            ? const SizedBox(height: 100, child: Center(child: CircularProgressIndicator()))
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _receiptOptionTile(
+                    context,
+                    icon: Icons.print_rounded,
+                    title: 'PRINT RECEIPT',
+                    subtitle: 'Send to thermal printer',
+                    onTap: () async {
+                      setState(() => isProcessing = true);
+                      await ReceiptService.printReceipt(sale);
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _receiptOptionTile(
+                    context,
+                    icon: Icons.sms_rounded,
+                    title: 'SEND VIA SMS',
+                    subtitle: sale.customerPhone ?? 'Enter custom number',
+                    enabled: true,
+                    onTap: () async {
+                      String? targetPhone = sale.customerPhone;
+                      if (targetPhone == null || targetPhone.isEmpty) {
+                        targetPhone = await PhonePromptDialog.show(context);
+                      }
+
+                      if (targetPhone != null && targetPhone.isNotEmpty) {
+                        setState(() => isProcessing = true);
+                        final success = await SmsService.sendReceiptSms(
+                          sale, 
+                          branchName: currentBranch?.name,
+                          customPhone: targetPhone,
+                        );
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(success ? 'SMS Sent' : 'SMS Failed'),
+                              backgroundColor: success ? Colors.green : Colors.red,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _receiptOptionTile(
+                    context,
+                    icon: Icons.share_rounded,
+                    title: 'SHARE PDF (WHATSAPP)',
+                    subtitle: 'Share via WhatsApp or Email',
+                    onTap: () async {
+                      setState(() => isProcessing = true);
+                      await ReceiptService.shareReceipt(sale);
+                      if (context.mounted) Navigator.pop(context);
+                    },
+                  ),
+                ],
+              ),
+          actions: [
+            TextButton(
+              onPressed: isProcessing ? null : () => Navigator.pop(context),
+              child: const Text('CANCEL', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _receiptOptionTile(BuildContext context, {required IconData icon, required String title, required String subtitle, required VoidCallback onTap, bool enabled = true}) {
+    final theme = Theme.of(context);
+    return ListTile(
+      onTap: enabled ? onTap : null,
+      enabled: enabled,
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(color: theme.colorScheme.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+        child: Icon(icon, color: theme.colorScheme.primary),
+      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+      subtitle: Text(subtitle, style: const TextStyle(fontSize: 11)),
+      trailing: const Icon(Icons.chevron_right, size: 18),
+      tileColor: theme.colorScheme.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: theme.dividerColor.withValues(alpha: 0.1))),
     );
   }
 
@@ -1307,7 +1083,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
               children: [
                 const Icon(Icons.edit_note, color: Colors.blue),
                 const SizedBox(width: 12),
-                Text('Edit Transaction ${sale.id}'),
+                Text('Edit Transaction ${sale.id.substring(0, 8)}'),
               ],
             ),
             content: SizedBox(
@@ -1317,7 +1093,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Modify item quantities or prices. Changes will update the database and alert the cashier for reprinting.', 
+                    const Text('Modify item quantities or prices. Changes will update the database.', 
                       style: TextStyle(fontSize: 11, color: Colors.blue)),
                     const SizedBox(height: 16),
                     ...editedItems.asMap().entries.map((entry) {
@@ -1341,7 +1117,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                             Expanded(
                               child: TextFormField(
                                 initialValue: item.quantity.toString(),
-                                decoration: const InputDecoration(labelText: 'Qty/Weight', isDense: true),
+                                decoration: const InputDecoration(labelText: 'Qty', isDense: true),
                                 keyboardType: TextInputType.number,
                                 onChanged: (value) {
                                   final newQty = double.tryParse(value) ?? item.quantity;
@@ -1360,7 +1136,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                             Expanded(
                               child: TextFormField(
                                 initialValue: item.priceAtSale.toString(),
-                                decoration: const InputDecoration(labelText: 'Price/kg', isDense: true, prefixText: '₵'),
+                                decoration: const InputDecoration(labelText: 'Price', isDense: true, prefixText: '₵'),
                                 keyboardType: TextInputType.number,
                                 onChanged: (value) {
                                   final newPrice = double.tryParse(value) ?? item.priceAtSale;
@@ -1405,25 +1181,121 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                   
                   await ref.read(saleHistoryProvider.notifier).updateSale(updatedSale);
                   
-                  // Notify the cashier/system
                   ref.read(notificationProvider.notifier).addNotification(
                     'RECEIPT UPDATED',
-                    'Receipt ${sale.id} was edited by Admin. Please re-print if necessary.',
+                    'Receipt ${sale.id} was edited by Admin.',
                   );
 
                   if (context.mounted) {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Transaction updated and saved to database.'), backgroundColor: AppColors.accentGreen),
+                      const SnackBar(content: Text('Transaction updated and saved to database.'), backgroundColor: Colors.green),
                     );
                   }
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.accentGreen, foregroundColor: Colors.white),
-                child: const Text('Save & Update DB'),
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                child: const Text('Save Changes'),
               ),
             ],
           );
         },
+      ),
+    );
+  }
+
+  void _confirmDeleteSelected() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Deletion'),
+        content: Text('Are you sure you want to delete ${_selectedSaleIds.length} transactions?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              setState(() => _isDeletingSelected = true);
+              Navigator.pop(context);
+              await ref.read(saleHistoryProvider.notifier).deleteSales(_selectedSaleIds.toList());
+              setState(() {
+                _isDeletingSelected = false;
+                _selectedSaleIds.clear();
+              });
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmReverseTransaction(BuildContext detailsContext, SaleRecord sale) {
+    showDialog(
+      context: detailsContext,
+      barrierDismissible: false,
+      builder: (confContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 12),
+            Text('Reverse Transaction?'),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to REVERSE this transaction (${sale.id})?\n\n'
+          '• The record status will be updated to REVERSED.\n'
+          '• Sold items will be returned to stock.\n'
+          '• Sales analytics will be rectified immediately.',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(confContext).pop(),
+            child: const Text('NO, KEEP IT'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              // 1. Close both dialogs safely
+              Navigator.of(confContext).pop(); 
+              Navigator.of(detailsContext).pop(); 
+              
+              try {
+                await ref.read(saleHistoryProvider.notifier).reverseSale(sale.id);
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Transaction reversed. Stock restored and analytics rectified.'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Reverse failed: $e'), backgroundColor: Colors.red),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('YES, REVERSE'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailRow(BuildContext context, String label, String value, {bool isBold = false, Color? color}) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurfaceVariant)),
+          Text(value, style: TextStyle(fontSize: 12, fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: color ?? theme.colorScheme.onSurface)),
+        ],
       ),
     );
   }
@@ -1434,47 +1306,8 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
       case SaleStatus.rectified: return Colors.blue;
       case SaleStatus.pendingCorrection: return Colors.orange;
       case SaleStatus.cancelled: return Colors.red;
+      case SaleStatus.reversed: return Colors.red.shade900;
       case SaleStatus.awaitingDeposit: return Colors.purple;
     }
-  }
-
-  void _confirmDeleteSelected(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Transactions?'),
-        content: Text('Are you sure you want to permanently delete ${_selectedSaleIds.length} selected transactions? This action cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('CANCEL')),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(dialogContext);
-              setState(() => _isDeletingSelected = true);
-              try {
-                await ref.read(saleHistoryProvider.notifier).deleteSales(_selectedSaleIds.toList());
-                if (!mounted) return;
-                setState(() {
-                  _selectedSaleIds.clear();
-                  _isDeletingSelected = false;
-                });
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Transactions deleted successfully.')),
-                );
-              } catch (e) {
-                if (!mounted) return;
-                setState(() => _isDeletingSelected = false);
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to delete: $e'), backgroundColor: Colors.red),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('DELETE'),
-          ),
-        ],
-      ),
-    );
   }
 }

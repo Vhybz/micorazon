@@ -1,0 +1,5 @@
+- [x] Add note input to Advance Payment dialog in `salary_management_screen.dart`
+- [x] Update `SmsService.sendSalarySms` to include payment note
+- [x] Update `ReceiptService.printPayslip` to display note
+- [x] Update `ProductCard` category text style (Red, larger font: 13px)
+- [x] Update `InventoryControlScreen` category text style in grid cards (13px)

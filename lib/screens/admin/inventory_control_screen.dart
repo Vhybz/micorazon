@@ -15,6 +15,7 @@ import '../../services/menu_service.dart';
 import '../../services/user_provider.dart';
 import '../../models/user_model.dart';
 import '../../services/transfer_provider.dart';
+import '../../widgets/passcode_guard.dart';
 
 import '../../services/product_seeder.dart';
 
@@ -57,13 +58,26 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
 
     return RolePopScope(
       currentRoute: currentRoute,
-      child: Scaffold(
-        backgroundColor: theme.scaffoldBackgroundColor,
-        appBar: const MainAppBar(title: 'Inventory Control', showMenuButton: true),
-        drawer: isDesktop
-            ? null
-            : Drawer(
-                child: AppSidebar(
+      child: PasscodeGuard(
+        child: Scaffold(
+          backgroundColor: theme.scaffoldBackgroundColor,
+          appBar: const MainAppBar(title: 'Inventory Control', showMenuButton: true),
+          drawer: isDesktop
+              ? null
+              : Drawer(
+                  child: AppSidebar(
+                    userId: user.id,
+                    userName: user.name,
+                    userRole: user.activePrimaryRole.name.toUpperCase(),
+                    currentRoute: currentRoute,
+                    items: MenuService.getMenuItemsForUser(user),
+                    onTap: (route) => MenuService.navigate(context, route, currentRoute),
+                  ),
+                ),
+          body: Row(
+            children: [
+              if (isDesktop)
+                AppSidebar(
                   userId: user.id,
                   userName: user.name,
                   userRole: user.activePrimaryRole.name.toUpperCase(),
@@ -71,80 +85,69 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                   items: MenuService.getMenuItemsForUser(user),
                   onTap: (route) => MenuService.navigate(context, route, currentRoute),
                 ),
-              ),
-        body: Row(
-          children: [
-            if (isDesktop)
-              AppSidebar(
-                userId: user.id,
-                userName: user.name,
-                userRole: user.activePrimaryRole.name.toUpperCase(),
-                currentRoute: currentRoute,
-                items: MenuService.getMenuItemsForUser(user),
-                onTap: (route) => MenuService.navigate(context, route, currentRoute),
-              ),
-            Expanded(
-              child: SafeArea(
-                top: false,
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(AppSpacing.l),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildHeader(context, ref, productsAsync.value ?? [], isAdmin: isAdmin),
-                      const SizedBox(height: AppSpacing.l),
-                      _buildFilters(theme, productsAsync.value ?? []),
-                      const SizedBox(height: AppSpacing.l),
-                      productsAsync.when(
-                        data: (products) {
-                          final activeProducts = products
-                              .where((p) => !p.isDeleted)
-                              .where((p) => _selectedCategory == 'All' || p.category == _selectedCategory)
-                              .where((p) => p.name.toLowerCase().contains(_searchQuery.toLowerCase()) || 
-                                             p.category.toLowerCase().contains(_searchQuery.toLowerCase()))
-                              .toList();
+              Expanded(
+                child: SafeArea(
+                  top: false,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(AppSpacing.l),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildHeader(context, ref, productsAsync.value ?? [], isAdmin: isAdmin),
+                        const SizedBox(height: AppSpacing.l),
+                        _buildFilters(theme, productsAsync.value ?? []),
+                        const SizedBox(height: AppSpacing.l),
+                        productsAsync.when(
+                          data: (products) {
+                            final activeProducts = products
+                                .where((p) => !p.isDeleted)
+                                .where((p) => _selectedCategory == 'All' || p.category == _selectedCategory)
+                                .where((p) => p.name.toLowerCase().contains(_searchQuery.toLowerCase()) || 
+                                               p.category.toLowerCase().contains(_searchQuery.toLowerCase()))
+                                .toList();
 
-                          // Sort: Priced products and higher quantity first
-                          activeProducts.sort((a, b) {
-                            // 1. Priced products (price > 0) come first
-                            final bool aPriced = a.retailPrice > 0;
-                            final bool bPriced = b.retailPrice > 0;
-                            if (aPriced != bPriced) return aPriced ? -1 : 1;
+                            // Sort: Priced products and higher quantity first
+                            activeProducts.sort((a, b) {
+                              // 1. Priced products (price > 0) come first
+                              final bool aPriced = a.retailPrice > 0;
+                              final bool bPriced = b.retailPrice > 0;
+                              if (aPriced != bPriced) return aPriced ? -1 : 1;
+                              
+                              // 2. Products with higher quantity come first
+                              return b.stockQuantity.compareTo(a.stockQuantity);
+                            });
                             
-                            // 2. Products with higher quantity come first
-                            return b.stockQuantity.compareTo(a.stockQuantity);
-                          });
-                          
-                          if (activeProducts.isEmpty) {
-                            return Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(40.0),
-                                child: Text('No products match criteria', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-                              ),
-                            );
-                          }
-                          return _buildProductGrid(context, activeProducts, ref, isAdmin: isAdmin);
-                        },
-                        loading: () => const Center(child: CircularProgressIndicator()),
-                        error: (err, _) => Center(child: Text('Error: $err')),
-                      ),
-                      // Add padding for bottom navigation bars
-                      const SizedBox(height: AppSpacing.xl),
-                    ],
+                            if (activeProducts.isEmpty) {
+                              return Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(40.0),
+                                  child: Text('No products match criteria', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+                                ),
+                              );
+                            }
+                            return _buildProductGrid(context, activeProducts, ref, isAdmin: isAdmin);
+                          },
+                          loading: () => const Center(child: CircularProgressIndicator()),
+                          error: (err, _) => Center(child: Text('Error: $err')),
+                        ),
+                        // Add padding for bottom navigation bars
+                        const SizedBox(height: AppSpacing.xl),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
-        ),
-        floatingActionButton: isAdmin ? SafeArea(
-          child: FloatingActionButton.extended(
-            onPressed: () => _showAddProductDialog(context, ref),
-            backgroundColor: theme.colorScheme.primary,
-            icon: const Icon(Icons.add, color: Colors.white),
-            label: const Text('Add New Product', style: TextStyle(color: Colors.white)),
+            ],
           ),
-        ) : null,
+          floatingActionButton: isAdmin ? SafeArea(
+            child: FloatingActionButton.extended(
+              onPressed: () => _showAddProductDialog(context, ref),
+              backgroundColor: theme.colorScheme.primary,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text('Add New Product', style: TextStyle(color: Colors.white)),
+            ),
+          ) : null,
+        ),
       ),
     );
   }
@@ -215,6 +218,47 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
           ),
         ),
       if (isAdmin) ...[
+        PopupMenuButton<String>(
+          onSelected: (val) {
+            if (val == 'unlimited') {
+              _showBulkUnlimitedDialog(context, ref, products, true);
+            } else if (val == 'fixed') {
+              _showBulkUnlimitedDialog(context, ref, products, false);
+            }
+          },
+          child: OutlinedButton.icon(
+            onPressed: null, // Let PopupMenuButton handle it
+            icon: const Icon(Icons.settings_suggest_outlined, size: 18),
+            label: const Text('Bulk Actions', style: TextStyle(fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: theme.colorScheme.primary,
+              side: BorderSide(color: theme.colorScheme.primary),
+            ),
+          ),
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'unlimited',
+              child: Row(
+                children: [
+                  Icon(Icons.all_inclusive, size: 18, color: Colors.blue),
+                  SizedBox(width: 8),
+                  Text('Set ALL to Unlimited'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'fixed',
+              child: Row(
+                children: [
+                  Icon(Icons.pin, size: 18, color: Colors.green),
+                  SizedBox(width: 8),
+                  Text('Set ALL to Fixed Qty'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 8),
         OutlinedButton.icon(
           onPressed: () => _showPromotionDialog(context, ref, products),
           icon: const Icon(Icons.campaign_outlined, size: 18),
@@ -303,6 +347,32 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
           ...actionButtons,
         ],
       ],
+    );
+  }
+
+  void _showBulkUnlimitedDialog(BuildContext context, WidgetRef ref, List<Product> products, bool isUnlimited) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(isUnlimited ? 'Set All to Unlimited?' : 'Set All to Fixed Qty?'),
+        content: Text(isUnlimited 
+          ? 'This will make every product in the catalog "Unlimited", meaning sales will not decrease the current stock levels. Continue?'
+          : 'This will make every product follow "Fixed" stock, where sales will subtract from the defined quantity. Continue?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () {
+              ref.read(productsFutureProvider.notifier).setUnlimitedStatus(isUnlimited);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('All products updated to ${isUnlimited ? "Unlimited" : "Fixed"} stock.'))
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: isUnlimited ? Colors.blue : Colors.green, foregroundColor: Colors.white),
+            child: const Text('PROCEED'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -552,13 +622,17 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     String selectedCategory = 'Cow';
     String? selectedProductName;
     WeightUnit selectedUnit = WeightUnit.kg;
+    bool isUnlimited = false;
 
     final Map<String, List<String>> categoryProductMap = {
       'Chicken': [
-        'Hard Thigh', 'Soft Thigh', 'Hard Breast', 'Soft Breast', 
-        'Hard Back', 'Soft Back', 'Hard Wings', 'Soft Wings', 
-        'Hard Half Chicken', 'Soft Half Chicken', 'Hard Whole Chicken', 
-        'Soft Whole Chicken', 'Hard Drumsticks', 'Soft Drumsticks',
+        'Hard Whole Chicken (Layer)', 'Soft Whole Chicken (Broiler)',
+        'Hard Thigh (Layer)', 'Soft Thigh (Broiler)', 
+        'Hard Breast (Layer)', 'Soft Breast (Broiler)', 
+        'Hard Back (Layer)', 'Soft Back (Broiler)', 
+        'Hard Wings (Layer)', 'Soft Wings (Broiler)', 
+        'Hard Drumsticks (Layer)', 'Soft Drumsticks (Broiler)',
+        'Gizzard',
         'Other'
       ],
       'Cow': [
@@ -721,6 +795,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         label: 'Retail',
                         prefix: '₵ ',
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onTap: () {
+                          if (retailPriceController.text == '0.0' || retailPriceController.text == '0') {
+                            retailPriceController.clear();
+                          }
+                        },
                         validator: (v) {
                           if (v == null || v.isEmpty) return 'Required';
                           if (double.tryParse(v) == null) return 'Invalid price';
@@ -736,6 +815,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         label: 'Wholesale',
                         prefix: '₵ ',
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onTap: () {
+                          if (wholesalePriceController.text == '0.0' || wholesalePriceController.text == '0') {
+                            wholesalePriceController.clear();
+                          }
+                        },
                         validator: (v) {
                           if (v == null || v.isEmpty) return 'Required';
                           if (double.tryParse(v) == null) return 'Invalid price';
@@ -751,6 +835,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         label: 'Cost',
                         prefix: '₵ ',
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        onTap: () {
+                          if (costPriceController.text == '0.0' || costPriceController.text == '0') {
+                            costPriceController.clear();
+                          }
+                        },
                         validator: (v) {
                           if (v == null || v.isEmpty) return 'Required';
                           if (double.tryParse(v) == null) return 'Invalid price';
@@ -768,10 +857,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                       child: _buildFormTextField(
                         context: context,
                         controller: stockController,
-                        label: 'Initial Stock',
+                        label: isUnlimited ? 'Current Quantity (Display only)' : 'Initial Stock',
                         suffix: selectedUnit.name,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         validator: (v) {
+                          if (isUnlimited) return null;
                           if (v == null || v.isEmpty) return 'Required';
                           if (double.tryParse(v) == null) return 'Invalid qty';
                           return null;
@@ -789,6 +879,16 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: AppSpacing.m),
+                SwitchListTile(
+                  title: const Text('Unlimited Stock', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Sales will not subtract from quantity', style: TextStyle(fontSize: 11)),
+                  value: isUnlimited, 
+                  onChanged: (v) => setState(() => isUnlimited = v),
+                  activeThumbColor: Colors.blue,
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
                 ),
               ],
             ),
@@ -828,6 +928,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                     imageUrl: finalImageUrl,
                     stockQuantity: double.tryParse(stockController.text) ?? 0.0,
                     unit: selectedUnit.name,
+                    isUnlimited: isUnlimited,
                   );
                   await ref.read(productsFutureProvider.notifier).addProduct(newProduct);
                   if (context.mounted) Navigator.pop(context);
@@ -857,6 +958,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     final otherCategoryController = TextEditingController();
     final theme = Theme.of(context);
     String selectedCategory = product.category;
+    bool isUnlimited = product.isUnlimited;
     final categories = ['Beef', 'Pork', 'Chicken', 'Lamb', 'Goat', 'Other'];
 
     if (!categories.contains(product.category)) {
@@ -949,6 +1051,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                           label: 'Retail Price', 
                           prefix: '₵ ',
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onTap: () {
+                            if (retailPriceController.text == '0.0' || retailPriceController.text == '0') {
+                              retailPriceController.clear();
+                            }
+                          },
                           validator: (v) {
                             if (v == null || v.isEmpty) return 'Required';
                             if (double.tryParse(v) == null) return 'Invalid price';
@@ -964,6 +1071,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                           label: 'Wholesale Price', 
                           prefix: '₵ ',
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onTap: () {
+                            if (wholesalePriceController.text == '0.0' || wholesalePriceController.text == '0') {
+                              wholesalePriceController.clear();
+                            }
+                          },
                           validator: (v) {
                             if (v == null || v.isEmpty) return 'Required';
                             if (double.tryParse(v) == null) return 'Invalid price';
@@ -979,6 +1091,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                           label: 'Cost Price', 
                           prefix: '₵ ',
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onTap: () {
+                            if (costPriceController.text == '0.0' || costPriceController.text == '0') {
+                              costPriceController.clear();
+                            }
+                          },
                           validator: (v) {
                             if (v == null || v.isEmpty) return 'Required';
                             if (double.tryParse(v) == null) return 'Invalid price';
@@ -987,6 +1104,16 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    title: const Text('Unlimited Stock', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                    subtitle: const Text('Sales will not subtract from quantity', style: TextStyle(fontSize: 11)),
+                    value: isUnlimited, 
+                    onChanged: (v) => setState(() => isUnlimited = v),
+                    activeThumbColor: Colors.blue,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
                   ),
                 ],
               ),
@@ -1021,6 +1148,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                     costPrice: double.tryParse(costPriceController.text),
                     category: selectedCategory == 'Other' ? otherCategoryController.text : selectedCategory,
                     imageUrl: finalImageUrl,
+                    isUnlimited: isUnlimited,
                   );
                   await ref.read(productsFutureProvider.notifier).updateProduct(updated);
                   if (context.mounted) Navigator.pop(context);
@@ -1049,9 +1177,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     String? Function(String?)? validator,
     bool isName = false,
     Function(String)? onChanged,
+    VoidCallback? onTap,
   }) {
     return TextFormField(
       controller: controller,
+      onTap: onTap,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
@@ -1074,7 +1204,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     return LayoutBuilder(builder: (context, constraints) {
       final isMobile = constraints.maxWidth < 600;
       final crossAxisCount = constraints.maxWidth > 1200 ? 4 : (constraints.maxWidth > 800 ? 3 : (constraints.maxWidth > 500 ? 2 : 1));
-      final aspectRatio = isMobile ? 1.4 : 0.75;
+      final aspectRatio = isMobile ? (constraints.maxWidth < 400 ? 1.2 : 1.4) : 0.72;
       
       return GridView.builder(
         shrinkWrap: true,
@@ -1128,14 +1258,14 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                               Row(
                                 children: [
                                   Expanded(
-                                    child: Text(product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    child: _buildFormattedName(product.name, const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                                   ),
                                   if (isAdmin) _buildItemMenu(context, ref, product),
                                 ],
                               ),
                               Row(
                                 children: [
-                                  Text(product.category, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11)),
+                                  Text(product.category.toUpperCase(), style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold)),
                                   if (hasIncoming) ...[
                                     const SizedBox(width: 8),
                                     Container(
@@ -1177,11 +1307,13 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: (isLowStock ? Colors.red : Colors.green).withValues(alpha: 0.1),
+                                          color: (product.isUnlimited ? Colors.blue : (isLowStock ? Colors.red : Colors.green)).withValues(alpha: 0.1),
                                           borderRadius: BorderRadius.circular(4),
                                         ),
-                                        child: Text('${product.stockQuantity}${product.unit}', 
-                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isLowStock ? Colors.red : Colors.green)),
+                                        child: Text(
+                                          product.isUnlimited ? 'UNLIMITED' : '${product.stockQuantity}${product.unit}', 
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: product.isUnlimited ? Colors.blue : (isLowStock ? Colors.red : Colors.green))
+                                        ),
                                       ),
                                       if (hasIncoming)
                                         Padding(
@@ -1278,9 +1410,9 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                             children: [
                               Text(
                                 product.category.toUpperCase(),
-                                style: TextStyle(
-                                  color: Theme.of(context).colorScheme.primary,
-                                  fontSize: 9,
+                                style: const TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: 0.5,
                                 ),
@@ -1296,7 +1428,9 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Expanded(child: Text(product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                              Expanded(
+                                child: _buildFormattedName(product.name, const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                              ),
                               if (isAdmin) _buildItemMenu(context, ref, product),
                             ],
                           ),
@@ -1339,8 +1473,10 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                 crossAxisAlignment: CrossAxisAlignment.end,
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text('${product.stockQuantity}${product.unit}', 
-                                    style: TextStyle(fontWeight: FontWeight.bold, color: isLowStock ? Colors.red : Colors.green)),
+                                  Text(
+                                    product.isUnlimited ? 'UNLIMITED' : '${product.stockQuantity}${product.unit}', 
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: product.isUnlimited ? Colors.blue : (isLowStock ? Colors.red : Colors.green))
+                                  ),
                                   if (hasIncoming)
                                     Text('+${pendingWeight.toStringAsFixed(1)}${product.unit} coming', 
                                       style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.blue.shade700))
@@ -1380,11 +1516,42 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     });
   }
 
+  Widget _buildFormattedName(String name, TextStyle baseStyle) {
+    if (!name.contains('(')) {
+      return Text(name, style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis);
+    }
+
+    final int splitIndex = name.lastIndexOf('(');
+    final String mainName = name.substring(0, splitIndex).trim();
+    final String range = name.substring(splitIndex).trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(mainName, style: baseStyle, maxLines: 1, overflow: TextOverflow.ellipsis),
+        Text(range, 
+          style: baseStyle.copyWith(
+            fontSize: baseStyle.fontSize! - 2, 
+            color: baseStyle.color?.withValues(alpha: 0.7) ?? Colors.black54,
+            fontWeight: FontWeight.normal,
+          ), 
+          maxLines: 1, 
+          overflow: TextOverflow.ellipsis
+        ),
+      ],
+    );
+  }
+
   Widget _buildItemMenu(BuildContext context, WidgetRef ref, Product product) {
+    final bool isWholeChicken = product.name.contains('Whole Chicken');
+
     return PopupMenuButton<String>(
       onSelected: (val) {
         if (val == 'edit') {
           _showEditProductDialog(context, ref, product);
+        } else if (val == 'portion' && isWholeChicken) {
+          _showChickenPortioningDialog(context, ref, product);
         } else if (val == 'delete') {
           _confirmDeleteProduct(context, ref, product);
         } else if (val == 'stop_promo') {
@@ -1396,6 +1563,17 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
       icon: const Icon(Icons.more_vert, size: 18),
       padding: EdgeInsets.zero,
       itemBuilder: (context) => [
+        if (isWholeChicken)
+          const PopupMenuItem(
+            value: 'portion',
+            child: Row(
+              children: [
+                Icon(Icons.restaurant_rounded, size: 18, color: Colors.orange),
+                SizedBox(width: 8),
+                Text('Portion Bird'),
+              ],
+            ),
+          ),
         const PopupMenuItem(
           value: 'edit',
           child: Row(
@@ -1446,104 +1624,151 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     final formKey = GlobalKey<FormState>();
     final stockController = TextEditingController();
     final theme = Theme.of(context);
+    WeightUnit selectedUnit = WeightUnit.values.firstWhere((u) => u.name == product.unit, orElse: () => WeightUnit.kg);
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        scrollable: true,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
-        title: Row(
-          children: [
-            const Icon(Icons.edit_note, color: AppColors.primaryMaroon),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text('Update Stock: ${product.name}', 
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                overflow: TextOverflow.ellipsis
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          scrollable: true,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+          title: Row(
+            children: [
+              const Icon(Icons.edit_note, color: AppColors.primaryMaroon),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('Update Stock: ${product.name}', 
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  overflow: TextOverflow.ellipsis
+                ),
               ),
-            ),
-          ],
-        ),
-        content: Form(
-          key: formKey,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(AppSpacing.m),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(AppRadius.s),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.inventory_2, color: theme.colorScheme.primary),
-                      const SizedBox(width: AppSpacing.m),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Current Inventory', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text('${product.stockQuantity} ${product.unit}', 
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: theme.colorScheme.primary)),
-                            ),
-                          ],
+            ],
+          ),
+          content: Form(
+            key: formKey,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.m),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(AppRadius.s),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.inventory_2, color: theme.colorScheme.primary),
+                        const SizedBox(width: AppSpacing.m),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Current Inventory', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
+                              FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(WeightConverter.formatShort(product.stockQuantity, unit: product.unit), 
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: theme.colorScheme.primary)),
+                              ),
+                            ],
+                          ),
                         ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.l),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: stockController,
+                          decoration: InputDecoration(
+                            labelText: selectedUnit == WeightUnit.unit ? 'Add/Remove Qty' : 'Add/Remove (${selectedUnit.name})',
+                            hintText: 'e.g. 50.0 or -10.5',
+                            helperText: 'Use negative to reduce',
+                            border: const OutlineInputBorder(),
+                          ),
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]'))],
+                          autofocus: true,
+                          validator: (v) {
+                            if (v == null || v.isEmpty) return 'Required';
+                            if (double.tryParse(v) == null) return 'Invalid';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        children: [
+                          const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                          ToggleButtons(
+                            constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+                            isSelected: [
+                              selectedUnit == WeightUnit.kg, 
+                              selectedUnit == WeightUnit.g,
+                              selectedUnit == WeightUnit.lb,
+                              selectedUnit == WeightUnit.unit,
+                            ],
+                            onPressed: (index) {
+                              setState(() {
+                                selectedUnit = WeightUnit.values[index];
+                              });
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            selectedColor: Colors.white,
+                            fillColor: theme.colorScheme.primary,
+                            children: const [
+                              Text('kg', style: TextStyle(fontSize: 9)),
+                              Text('g', style: TextStyle(fontSize: 9)),
+                              Text('lb', style: TextStyle(fontSize: 9)),
+                              Text('pcs', style: TextStyle(fontSize: 9)),
+                            ],
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(height: AppSpacing.l),
-                TextFormField(
-                  controller: stockController,
-                  decoration: InputDecoration(
-                    labelText: 'Add/Remove Quantity',
-                    hintText: 'e.g. 50.0 or -10.5',
-                    helperText: 'Use negative value to reduce stock',
-                    suffixText: product.unit,
-                    border: const OutlineInputBorder(),
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]'))],
-                  autofocus: true,
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Required';
-                    if (double.tryParse(v) == null) return 'Invalid quantity';
-                    return null;
-                  },
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                final quantity = double.tryParse(stockController.text) ?? 0.0;
-                if (quantity != 0) {
-                  ref.read(productsFutureProvider.notifier).updateStock(product.id, quantity);
-                  Navigator.pop(context);
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  double change = double.tryParse(stockController.text) ?? 0.0;
+                  if (change != 0) {
+                    // Normalize to master unit (kg or unit)
+                    if (product.unit == 'unit') {
+                      // If master is unit, we just add the absolute value
+                      ref.read(productsFutureProvider.notifier).updateStock(product.id, change);
+                    } else {
+                      // If master is weight (kg), we convert from selected unit to kg
+                      if (selectedUnit == WeightUnit.g) change = WeightConverter.fromG(change);
+                      if (selectedUnit == WeightUnit.lb) change = WeightConverter.toKg(change);
+                      ref.read(productsFutureProvider.notifier).updateStock(product.id, change);
+                    }
+                    Navigator.pop(context);
+                  }
                 }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: theme.colorScheme.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.colorScheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+              ),
+              child: const Text('Update'),
             ),
-            child: const Text('Update'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1574,6 +1799,211 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
             child: const Text('Delete Product'),
           ),
+        ],
+      ),
+    );
+  }
+
+  void _showChickenPortioningDialog(BuildContext context, WidgetRef ref, Product wholeChicken) {
+    final qtyController = TextEditingController(text: '1');
+    final gizzardController = TextEditingController(text: '0');
+    final type = wholeChicken.name.contains('Soft') ? 'Soft' : 'Hard';
+    final typeSuffix = type == 'Soft' ? 'Broiler' : 'Layer';
+    bool isProcessing = false;
+    WeightUnit selectedGizzardUnit = WeightUnit.kg;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+          title: Row(
+            children: [
+              const Icon(Icons.restaurant_rounded, color: Colors.orange),
+              const SizedBox(width: 12),
+              Expanded(child: Text('Portion: ${wholeChicken.name}', overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('This will reduce the count of whole birds and increase stock for parts.', 
+                style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 24),
+              TextField(
+                controller: qtyController,
+                decoration: const InputDecoration(
+                  labelText: 'Number of Birds to Portion',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.numbers),
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: gizzardController,
+                      decoration: InputDecoration(
+                        labelText: 'Gizzard Weight (${selectedGizzardUnit.name})',
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.scale),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    children: [
+                      const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                      ToggleButtons(
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        isSelected: [
+                          selectedGizzardUnit == WeightUnit.kg, 
+                          selectedGizzardUnit == WeightUnit.g,
+                          selectedGizzardUnit == WeightUnit.lb,
+                        ],
+                        onPressed: (index) {
+                          setState(() {
+                            if (index == 0) selectedGizzardUnit = WeightUnit.kg;
+                            if (index == 1) selectedGizzardUnit = WeightUnit.g;
+                            if (index == 2) selectedGizzardUnit = WeightUnit.lb;
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        selectedColor: Colors.white,
+                        fillColor: Colors.orange,
+                        children: const [
+                          Text('kg', style: TextStyle(fontSize: 9)),
+                          Text('g', style: TextStyle(fontSize: 9)),
+                          Text('lb', style: TextStyle(fontSize: 9)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+                ),
+                child: Column(
+                  children: [
+                    _portionRatioRow('Thighs', '2'),
+                    _portionRatioRow('Wings', '2'),
+                    _portionRatioRow('Drumsticks', '2'),
+                    _portionRatioRow('Breast', '1'),
+                    _portionRatioRow('Back', '1'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: isProcessing ? null : () => Navigator.pop(context), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: isProcessing ? null : () async {
+                final int birds = int.tryParse(qtyController.text) ?? 0;
+                double gizzardWeight = double.tryParse(gizzardController.text) ?? 0.0;
+                
+                if (birds <= 0) return;
+                if (birds > wholeChicken.stockQuantity) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not enough whole chickens in stock!')));
+                  return;
+                }
+
+                // Handle unit conversion to KG
+                if (selectedGizzardUnit == WeightUnit.g) {
+                  gizzardWeight = WeightConverter.fromG(gizzardWeight);
+                } else if (selectedGizzardUnit == WeightUnit.lb) {
+                  gizzardWeight = WeightConverter.toKg(gizzardWeight);
+                }
+
+                setState(() => isProcessing = true);
+                try {
+                  final notifier = ref.read(productsFutureProvider.notifier);
+                  final products = ref.read(productsFutureProvider).value ?? [];
+                  
+                  // 0. Extract Range Suffix (e.g. "(3.0 - 4.0 LB)")
+                  String rangeSuffix = '';
+                  if (wholeChicken.name.contains('(') && wholeChicken.name.contains(')')) {
+                    rangeSuffix = wholeChicken.name.substring(wholeChicken.name.lastIndexOf('('));
+                  }
+
+                  // 1. Update Whole Chicken
+                  await notifier.updateStock(wholeChicken.id, -birds.toDouble(), reason: 'PORTIONING_REDUCTION');
+
+                  // 2. Update Parts with real-world anatomy ratios
+                  final partsToUpdate = {
+                    'Thigh': birds * 2.0,
+                    'Wings': birds * 2.0,
+                    'Drumsticks': birds * 2.0,
+                    'Breast': birds * 1.0,
+                    'Back': birds * 1.0,
+                  };
+
+                  for (var entry in partsToUpdate.entries) {
+                    // Find the specific card that matches type (Soft/Hard), Part Name, and Range
+                    final part = products.where((p) => 
+                      p.name.contains(type) && // Soft or Hard
+                      p.name.contains(entry.key) && // Thigh, Wings, etc.
+                      (rangeSuffix.isEmpty || p.name.contains(rangeSuffix)) // Same weight range
+                    ).firstOrNull;
+
+                    if (part != null) {
+                      await notifier.updateStock(part.id, entry.value, reason: 'PORTIONING_ADDITION');
+                    } else {
+                       debugPrint('WARNING: Could not find matching part card for ${entry.key} in range $rangeSuffix');
+                    }
+                  }
+
+                  // 3. Update Gizzard (Single global card)
+                  final gizzard = products.firstWhere((p) => p.name.toUpperCase() == 'GIZZARD');
+                  if (gizzardWeight > 0) {
+                    await notifier.updateStock(gizzard.id, gizzardWeight, reason: 'PORTIONING_GIZZARD');
+                  }
+
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Portioned $birds $type chickens successfully!'), backgroundColor: Colors.green)
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+                    setState(() => isProcessing = false);
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
+              child: isProcessing 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Text('Confirm Portioning'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _portionRatioRow(String part, String ratio) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(part, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
+          Text('+$ratio per bird', style: const TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.bold)),
         ],
       ),
     );

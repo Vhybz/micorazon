@@ -7,6 +7,7 @@ import '../../services/butcher_service.dart';
 import '../../core/uuid_utils.dart';
 import '../../services/butcher_navigation_provider.dart';
 import '../../services/label_service.dart';
+import '../../core/utils.dart';
 
 class CarcassBreakdownScreen extends ConsumerStatefulWidget {
   const CarcassBreakdownScreen({super.key});
@@ -17,7 +18,7 @@ class CarcassBreakdownScreen extends ConsumerStatefulWidget {
 
 class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen> {
   final Map<String, TextEditingController> _controllers = {};
-  final Map<String, String> _units = {}; // Added to track 'kg' vs 'Qty'
+  final Map<String, WeightUnit> _units = {}; 
   final TextEditingController _wasteController = TextEditingController();
   bool _isSaving = false;
   String? _errorMessage;
@@ -29,8 +30,16 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
     final log = ref.read(activeSlaughterLogProvider);
     if (log != null) {
       for (var cut in log.type.standardCuts) {
-        _controllers[cut] = TextEditingController();
-        _units[cut] = 'kg'; // Default unit
+        final defaultVal = log.type.defaultValueFor(cut);
+        _controllers[cut] = TextEditingController(
+          text: defaultVal != null ? defaultVal.toStringAsFixed(0) : '',
+        );
+        final String defUnitStr = log.type.defaultUnitFor(cut);
+        // Safely resolve the unit from string name
+        _units[cut] = WeightUnit.values.firstWhere(
+          (u) => u.name == defUnitStr, 
+          orElse: () => WeightUnit.kg
+        );
         _controllers[cut]!.addListener(_calculateTotals);
       }
       _wasteController.addListener(_calculateTotals);
@@ -40,9 +49,16 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
   void _calculateTotals() {
     double sum = 0;
     _controllers.forEach((name, controller) {
-      // Only count 'kg' units towards the weight balance
-      if (_units[name] == 'kg') {
-        sum += double.tryParse(controller.text) ?? 0;
+      final val = double.tryParse(controller.text) ?? 0;
+      final unit = _units[name] ?? WeightUnit.kg;
+      
+      // Only weight-based units (kg, lb, g) count towards the carcass balance
+      if (unit == WeightUnit.kg) {
+        sum += val;
+      } else if (unit == WeightUnit.lb) {
+        sum += WeightConverter.toKg(val);
+      } else if (unit == WeightUnit.g) {
+        sum += WeightConverter.fromG(val);
       }
     });
     final waste = double.tryParse(_wasteController.text) ?? 0;
@@ -280,7 +296,7 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
   }
 
   Widget _buildCutInput(String name) {
-    final bool isQty = _units[name] == 'Qty';
+    final WeightUnit unit = _units[name] ?? WeightUnit.kg;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -306,19 +322,21 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
               GestureDetector(
                 onTap: () {
                   setState(() {
-                    _units[name] = isQty ? 'kg' : 'Qty';
+                    // Cycle through: kg -> g -> lb -> unit
+                    final nextIndex = (unit.index + 1) % WeightUnit.values.length;
+                    _units[name] = WeightUnit.values[nextIndex];
                     _calculateTotals();
                   });
                 },
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isQty ? Colors.blue.shade50 : Colors.grey.shade100,
+                    color: unit == WeightUnit.unit ? Colors.blue.shade50 : Colors.grey.shade100,
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: isQty ? Colors.blue.shade200 : Colors.grey.shade300),
+                    border: Border.all(color: unit == WeightUnit.unit ? Colors.blue.shade200 : Colors.grey.shade300),
                   ),
-                  child: Text(isQty ? 'Qty' : 'kg', 
-                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: isQty ? Colors.blue : Colors.grey.shade700)
+                  child: Text(unit == WeightUnit.unit ? 'pcs' : unit.name, 
+                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: unit == WeightUnit.unit ? Colors.blue : Colors.grey.shade700)
                   ),
                 ),
               ),
@@ -334,7 +352,7 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
               isDense: true,
               contentPadding: EdgeInsets.zero,
               border: InputBorder.none,
-              suffixText: isQty ? ' units' : ' kg',
+              suffixText: unit == WeightUnit.unit ? ' units' : ' ${unit.name}',
               suffixStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.normal, color: Colors.grey),
               hintText: '0.0',
             ),
@@ -445,12 +463,17 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
 
       _controllers.forEach((cutName, controller) {
         final val = double.tryParse(controller.text) ?? 0;
-        if (_units[cutName] == 'kg') {
-          totalCarcassWeight += val;
+        final unit = _units[cutName] ?? WeightUnit.kg;
+        
+        if (unit != WeightUnit.unit) {
+          double kgVal = val;
+          if (unit == WeightUnit.lb) kgVal = WeightConverter.toKg(val);
+          if (unit == WeightUnit.g) kgVal = WeightConverter.fromG(val);
+          totalCarcassWeight += kgVal;
         }
       });
 
-      // Validation: Carcass weight vs Intake Meat Weight Estimate (Only for kg items)
+      // Validation: Carcass weight vs Intake Meat Weight Estimate (Only for weight items)
       if (totalCarcassWeight > (log.meatWeight + 0.5)) { // Allow a tiny buffer
         setState(() {
           _isSaving = false;
@@ -470,13 +493,25 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
       _controllers.forEach((cutName, controller) {
         final value = double.tryParse(controller.text) ?? 0;
         if (value > 0) {
+          final unit = _units[cutName] ?? WeightUnit.kg;
+          double finalVal = value;
+          String finalUnit = 'kg';
+
+          if (unit == WeightUnit.unit) {
+            finalUnit = 'unit';
+          } else {
+            // Normalize all weights to KG for master inventory
+            if (unit == WeightUnit.lb) finalVal = WeightConverter.toKg(value);
+            if (unit == WeightUnit.g) finalVal = WeightConverter.fromG(value);
+          }
+
           meatCuts.add(MeatCut(
             id: UuidUtils.generate(),
             name: cutName,
             meatType: log.type.displayName,
             batchId: log.id,
-            weight: value,
-            unit: _units[cutName] ?? 'kg',
+            weight: finalVal,
+            unit: finalUnit,
             processedAt: now,
           ));
         }

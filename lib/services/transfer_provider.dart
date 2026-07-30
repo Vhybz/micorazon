@@ -13,6 +13,9 @@ import '../models/product.dart';
 import 'offline_sync_service.dart';
 import 'user_provider.dart';
 
+import 'sms_service.dart';
+import 'branch_provider.dart';
+
 class TransferNotifier extends StateNotifier<List<StockTransfer>> {
   final SupabaseTransferService _service;
   final Ref ref;
@@ -71,13 +74,17 @@ class TransferNotifier extends StateNotifier<List<StockTransfer>> {
   void _startSubscription() {
     _subscription?.cancel();
     try {
-      _subscription = _service.watchTransfers().listen((transfers) {
-        debugPrint('Stock Transfer Stream: Syncing ${transfers.length} items from cloud.');
-        _saveToCache(transfers);
-        _applyOverridesAndSetState(transfers);
-      }, onError: (err) {
-        debugPrint('Stock Transfer Stream ERROR: $err');
-      });
+      _subscription = _service.watchTransfers().listen(
+        (transfers) {
+          debugPrint('Stock Transfer Stream: Syncing ${transfers.length} items from cloud.');
+          _saveToCache(transfers);
+          _applyOverridesAndSetState(transfers);
+        }, 
+        onError: (err) {
+          debugPrint('Stock Transfer Stream Connection Error (Resuming?): $err');
+        },
+        cancelOnError: false,
+      );
     } catch (e) {
       debugPrint('Stock Transfer Stream Init Failed: $e');
     }
@@ -210,6 +217,29 @@ class TransferNotifier extends StateNotifier<List<StockTransfer>> {
       'ATTENTION CASHIER: ${tWithBranch.meatType} (${tWithBranch.weight}${tWithBranch.unit}) has been dispatched to your branch.',
       targetBranchCode: tWithBranch.destination,
     );
+
+    // Send SMS Notifications
+    _sendTransferSms(tWithBranch.destination, '${tWithBranch.weight}${tWithBranch.unit} of ${tWithBranch.meatType}');
+  }
+
+  Future<void> _sendTransferSms(String branchCode, String itemDetails) async {
+    try {
+      final branchesAsync = ref.read(branchesProvider);
+      final users = ref.read(userProvider);
+      
+      final branch = branchesAsync.whenOrNull(
+        data: (list) => list.where((b) => b.code == branchCode).firstOrNull,
+      );
+
+      await SmsService.sendTransferNotificationSms(
+        branchName: branch?.name ?? branchCode,
+        branchCode: branchCode,
+        itemDetails: itemDetails,
+        branchUsers: users,
+      );
+    } catch (e) {
+      debugPrint('Error sending transfer SMS: $e');
+    }
   }
 
   Future<void> addTransfers(List<StockTransfer> transfers) async {
@@ -248,6 +278,12 @@ class TransferNotifier extends StateNotifier<List<StockTransfer>> {
           'ATTENTION CASHIER: ${processed.length} items (${totalWeight.toStringAsFixed(1)}${processed.first.unit}) are on the way.',
           targetBranchCode: processed.first.destination,
           type: 'success',
+        );
+
+        // Send SMS Notifications
+        _sendTransferSms(
+          processed.first.destination, 
+          '${processed.length} items (${totalWeight.toStringAsFixed(1)}${processed.first.unit})'
         );
       }
     } catch (e) {

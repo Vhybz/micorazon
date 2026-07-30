@@ -15,6 +15,7 @@ class OfflineSyncService {
   static const String expensesBoxName = 'expenses_cache';
   static const String transfersBoxName = 'transfers_cache';
   static const String butcherBoxName = 'butcher_cache';
+  static const String auditBoxName = 'audit_cache';
   static const String settingsBoxName = 'app_settings';
   static StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   static bool _isProcessing = false;
@@ -31,6 +32,7 @@ class OfflineSyncService {
       await Hive.openBox(expensesBoxName);
       await Hive.openBox(transfersBoxName);
       await Hive.openBox(butcherBoxName);
+      await Hive.openBox(auditBoxName);
       await Hive.openBox(settingsBoxName);
       
       // Listen for connectivity changes to trigger sync automatically

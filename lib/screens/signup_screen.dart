@@ -507,15 +507,16 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         }
 
         final authResponse = await ref.read(authServiceProvider).signUp(email, password);
+        final authUser = authResponse.user;
         
-        if (authResponse.user != null) {
+        if (authUser != null) {
           final adminExists = await userNotifier.checkIfAnyAdminExists();
           final isFirstAdmin = !adminExists && _selectedRole == UserRole.admin;
           
           debugPrint('Signup Trace: AdminExists=$adminExists, SelectedRole=$_selectedRole, IsFirstAdmin=$isFirstAdmin');
           
           final newUser = UserAccount(
-            id: authResponse.user!.id,
+            id: authUser.id,
             firstName: _firstNameController.text.trim(),
             surname: _surnameController.text.trim(),
             email: email,
@@ -545,7 +546,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           try {
             await userNotifier.addAccount(newUser);
             if (_selectedRole == UserRole.admin && (_isCreatingBranch || noBranchesExist)) {
-              await ref.read(branchesProvider.notifier).setBranchAdmin(branchCode!, newUser.id);
+              if (branchCode != null) {
+                await ref.read(branchesProvider.notifier).setBranchAdmin(branchCode, newUser.id);
+              }
             }
             
             // SMS Notifications (Best effort)

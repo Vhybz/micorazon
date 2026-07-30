@@ -11,8 +11,13 @@ class AiService {
 
   AiService(this.user);
 
-  String get _provider => (dotenv.env['AI_PROVIDER'] ?? 'openai').toLowerCase();
-  String get _apiKey => (dotenv.env['AI_API_KEY'] ?? '').trim();
+  String get _provider => const String.fromEnvironment('AI_PROVIDER', defaultValue: '').isEmpty 
+      ? (dotenv.env['AI_PROVIDER'] ?? 'openai').toLowerCase() 
+      : const String.fromEnvironment('AI_PROVIDER').toLowerCase();
+
+  String get _apiKey => const String.fromEnvironment('AI_API_KEY', defaultValue: '').isEmpty 
+      ? (dotenv.env['AI_API_KEY'] ?? '').trim() 
+      : const String.fromEnvironment('AI_API_KEY').trim();
 
   Future<String> getResponse(String message, List<Map<String, String>> history) async {
     if (_apiKey.isEmpty) {

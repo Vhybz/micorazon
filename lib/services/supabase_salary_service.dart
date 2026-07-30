@@ -27,6 +27,14 @@ class SupabaseSalaryService {
     await _client.from('staff_payments_audit').insert(record.toJson());
   }
 
+  Future<void> updateSalaryPayment(SalaryRecord record) async {
+    await _client.from('staff_payments_audit').update(record.toJson()).eq('id', record.id);
+  }
+
+  Future<void> deleteSalaryPayment(String id) async {
+    await _client.from('staff_payments_audit').delete().eq('id', id);
+  }
+
   Stream<List<SalaryRecord>> watchSalaryPayments() {
     return _client
         .from('staff_payments_audit')

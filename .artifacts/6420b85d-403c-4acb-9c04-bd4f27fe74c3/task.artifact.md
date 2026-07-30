@@ -1,0 +1,5 @@
+- `[x]` Update `UserAccount` model with `passcodeSentAt` field
+- `[x]` Update `UserNotifier` to set `passcode_sent_at` timestamp
+- `[x]` Add Lock Icon to `MainAppBar`
+- `[x]` Update `PasscodeGuard` to show delivery info and "Switch Account"
+- `[x]` Update `AccountSwitchDialog` to show delivery info

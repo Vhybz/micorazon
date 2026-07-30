@@ -243,7 +243,7 @@ class _StockTransferScreenState extends ConsumerState<StockTransferScreen> {
                     child: Icon(Icons.inventory_2, color: theme.colorScheme.primary, size: 20),
                   ),
                   title: Text(cut.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  subtitle: Text('${cut.weight}kg • From Batch ${cut.batchId.substring(0,8)}', style: const TextStyle(fontSize: 10)),
+                  subtitle: Text('${WeightConverter.formatShort(cut.weight, unit: cut.unit)} • From Batch ${cut.batchId.substring(0,8)}', style: const TextStyle(fontSize: 10)),
                   trailing: ElevatedButton(
                     onPressed: () => _showQuickTransferDialog(context, ref, cut),
                     style: ElevatedButton.styleFrom(
@@ -266,6 +266,7 @@ class _StockTransferScreenState extends ConsumerState<StockTransferScreen> {
     final branches = ref.read(branchesProvider).value ?? [];
     if (branches.isNotEmpty) destination = branches.first.code;
     final weightController = TextEditingController(text: cut.weight.toString());
+    WeightUnit selectedUnit = WeightUnit.values.firstWhere((u) => u.name == cut.unit, orElse: () => WeightUnit.kg);
 
     showDialog(
       context: context,
@@ -276,17 +277,52 @@ class _StockTransferScreenState extends ConsumerState<StockTransferScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('Available: ${cut.weight}${cut.unit}'),
+              Text('Available: ${WeightConverter.formatShort(cut.weight, unit: cut.unit)}'),
               const SizedBox(height: 16),
-              TextField(
-                controller: weightController,
-                decoration: InputDecoration(
-                  labelText: 'Amount to Transfer',
-                  suffixText: cut.unit,
-                  border: const OutlineInputBorder(),
-                ),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: weightController,
+                      decoration: InputDecoration(
+                        labelText: selectedUnit == WeightUnit.unit ? 'Quantity' : 'Amount (${selectedUnit.name})',
+                        suffixText: selectedUnit == WeightUnit.unit ? 'pcs' : selectedUnit.name,
+                        border: const OutlineInputBorder(),
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    children: [
+                      const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                      ToggleButtons(
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+                        isSelected: [
+                          selectedUnit == WeightUnit.kg, 
+                          selectedUnit == WeightUnit.g,
+                          selectedUnit == WeightUnit.lb,
+                          selectedUnit == WeightUnit.unit,
+                        ],
+                        onPressed: (index) {
+                          setState(() {
+                            selectedUnit = WeightUnit.values[index];
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        selectedColor: Colors.white,
+                        fillColor: AppColors.primaryMaroon,
+                        children: const [
+                          Text('kg', style: TextStyle(fontSize: 9)),
+                          Text('g', style: TextStyle(fontSize: 9)),
+                          Text('lb', style: TextStyle(fontSize: 9)),
+                          Text('pcs', style: TextStyle(fontSize: 9)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
@@ -307,15 +343,21 @@ class _StockTransferScreenState extends ConsumerState<StockTransferScreen> {
               onPressed: () async {
                 if (destination == null) return;
 
-                final double transferredWeight = double.tryParse(weightController.text) ?? 0.0;
-                if (transferredWeight <= 0) return;
+                double transferredAmount = double.tryParse(weightController.text) ?? 0.0;
+                if (transferredAmount <= 0) return;
+
+                // Normalized weight for stock comparison (in KG)
+                double normalizedTransfer = transferredAmount;
+                if (selectedUnit == WeightUnit.g) normalizedTransfer = WeightConverter.fromG(transferredAmount);
+                if (selectedUnit == WeightUnit.lb) normalizedTransfer = WeightConverter.toKg(transferredAmount);
 
                 final now = DateTime.now();
                 final transfer = StockTransfer(
                   id: UuidUtils.generate(),
                   batchId: cut.batchId,
                   meatType: '${cut.meatType} - ${cut.name}',
-                  weight: transferredWeight,
+                  weight: normalizedTransfer,
+                  unit: selectedUnit == WeightUnit.unit ? 'unit' : 'kg',
                   destination: destination!,
                   transferTime: now,
                   status: TransferStatus.pending,
@@ -323,10 +365,10 @@ class _StockTransferScreenState extends ConsumerState<StockTransferScreen> {
 
                 await ref.read(transferProvider.notifier).addTransfer(transfer);
 
-                if (transferredWeight >= cut.weight) {
+                if (normalizedTransfer >= cut.weight) {
                   await ref.read(recentCutsProvider.notifier).deleteCut(cut.id);
                 } else {
-                  final remaining = cut.weight - transferredWeight;
+                  final remaining = cut.weight - normalizedTransfer;
                   await ref.read(recentCutsProvider.notifier).updateCutWeight(cut.id, remaining);
                 }
 
@@ -334,7 +376,7 @@ class _StockTransferScreenState extends ConsumerState<StockTransferScreen> {
                   Navigator.pop(context);
                   LabelService.printTransferLabel(transfer);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Successfully transferred ${transferredWeight.toStringAsFixed(1)}kg to $destination')),
+                    SnackBar(content: Text('Successfully transferred ${WeightConverter.formatShort(normalizedTransfer, unit: transfer.unit)} to $destination')),
                   );
                 }
               },
@@ -450,7 +492,7 @@ class _StockTransferScreenState extends ConsumerState<StockTransferScreen> {
                         children: [
                           Padding(padding: const EdgeInsets.all(12), child: Text(t.id.substring(t.id.length - 8), style: const TextStyle(fontSize: 12, fontFamily: 'monospace'))),
                           Padding(padding: const EdgeInsets.all(12), child: Text(DateFormat('hh:mm a').format(t.transferTime), style: const TextStyle(fontSize: 12))),
-                          Padding(padding: const EdgeInsets.all(12), child: Text('${t.meatType} (${WeightConverter.formatShort(t.weight)})', style: const TextStyle(fontSize: 10), overflow: TextOverflow.ellipsis)),
+                          Padding(padding: const EdgeInsets.all(12), child: Text('${t.meatType} (${WeightConverter.formatShort(t.weight, unit: t.unit)})', style: const TextStyle(fontSize: 10), overflow: TextOverflow.ellipsis)),
                           Padding(padding: const EdgeInsets.all(12), child: Text(destinationDisplay, style: const TextStyle(fontSize: 12))),
                           Padding(padding: const EdgeInsets.all(8), child: StatusChip(
                             label: t.status.name.toUpperCase(), 
@@ -502,9 +544,11 @@ class _NewTransferDialogState extends ConsumerState<NewTransferDialog> {
   final Set<String> _selectedCutIds = {};
   String? _destination;
   bool _isThirdParty = false;
+  WeightUnit _directUnit = WeightUnit.kg;
   final _thirdPartyCustomerController = TextEditingController();
 
   final _cutWeights = <String, double>{};
+  final _cutUnits = <String, WeightUnit>{};
 
   @override
   void dispose() {
@@ -608,11 +652,50 @@ class _NewTransferDialogState extends ConsumerState<NewTransferDialog> {
                 error: (e, _) => const Text('Error loading products'),
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _weightController,
-                decoration: const InputDecoration(labelText: 'Quantity (kg)', border: OutlineInputBorder()),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _weightController,
+                      decoration: InputDecoration(
+                        labelText: _directUnit == WeightUnit.unit ? 'Quantity' : 'Amount (${_directUnit.name})', 
+                        border: const OutlineInputBorder(),
+                        suffixText: _directUnit == WeightUnit.unit ? 'pcs' : _directUnit.name,
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    children: [
+                      const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                      ToggleButtons(
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+                        isSelected: [
+                          _directUnit == WeightUnit.kg, 
+                          _directUnit == WeightUnit.g,
+                          _directUnit == WeightUnit.lb,
+                          _directUnit == WeightUnit.unit,
+                        ],
+                        onPressed: (index) {
+                          setState(() {
+                            _directUnit = WeightUnit.values[index];
+                          });
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        selectedColor: Colors.white,
+                        fillColor: AppColors.primaryMaroon,
+                        children: const [
+                          Text('kg', style: TextStyle(fontSize: 9)),
+                          Text('g', style: TextStyle(fontSize: 9)),
+                          Text('lb', style: TextStyle(fontSize: 9)),
+                          Text('pcs', style: TextStyle(fontSize: 9)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ] else ...[
               batchesAsync.when(
@@ -675,12 +758,13 @@ class _NewTransferDialogState extends ConsumerState<NewTransferDialog> {
                         final isSelected = _selectedCutIds.contains(cut.id);
                         return CheckboxListTile(
                           title: Text(cut.name, style: const TextStyle(fontSize: 13)),
-                          subtitle: Text('${cut.weight}kg', style: const TextStyle(fontSize: 11)),
+                          subtitle: Text(WeightConverter.formatShort(cut.weight, unit: cut.unit), style: const TextStyle(fontSize: 11)),
                           value: isSelected,
                           onChanged: (val) {
                             setState(() {
                               if (val == true) {
                                 _selectedCutIds.add(cut.id);
+                                _cutUnits[cut.id] = WeightUnit.values.firstWhere((u) => u.name == cut.unit, orElse: () => WeightUnit.kg);
                               } else {
                                 _selectedCutIds.remove(cut.id);
                               }
@@ -697,22 +781,57 @@ class _NewTransferDialogState extends ConsumerState<NewTransferDialog> {
                 const Align(alignment: Alignment.centerLeft, child: Text('Adjust Quantities:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                 const SizedBox(height: 4),
                 Container(
-                  constraints: const BoxConstraints(maxHeight: 120),
+                  constraints: const BoxConstraints(maxHeight: 150),
                   child: ListView.builder(
                     itemCount: _selectedCutIds.length,
                     itemBuilder: (context, index) {
                       final cutId = _selectedCutIds.elementAt(index);
                       final cut = availableCuts.firstWhere((c) => c.id == cutId);
+                      final currentUnit = _cutUnits[cut.id] ?? WeightUnit.kg;
+
                       return ListTile(
-                        title: Text(cut.name, style: const TextStyle(fontSize: 12)),
-                        subtitle: TextFormField(
-                          initialValue: cut.weight.toString(),
-                          decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 4)),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          onChanged: (v) {
-                            final val = double.tryParse(v);
-                            if (val != null) _cutWeights[cut.id] = val;
-                          },
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(cut.name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        subtitle: Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: cut.weight.toString(),
+                                decoration: InputDecoration(
+                                  isDense: true, 
+                                  contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                                  suffixText: currentUnit.name,
+                                ),
+                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                onChanged: (v) {
+                                  final val = double.tryParse(v);
+                                  if (val != null) _cutWeights[cut.id] = val;
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            ToggleButtons(
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              isSelected: [
+                                currentUnit == WeightUnit.kg,
+                                currentUnit == WeightUnit.g,
+                                currentUnit == WeightUnit.lb,
+                                currentUnit == WeightUnit.unit,
+                              ],
+                              onPressed: (index) {
+                                setState(() {
+                                  _cutUnits[cut.id] = WeightUnit.values[index];
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(4),
+                              children: const [
+                                Text('k', style: TextStyle(fontSize: 8)),
+                                Text('g', style: TextStyle(fontSize: 8)),
+                                Text('l', style: TextStyle(fontSize: 8)),
+                                Text('p', style: TextStyle(fontSize: 8)),
+                              ],
+                            ),
+                          ],
                         ),
                       );
                     },
@@ -778,25 +897,38 @@ class _NewTransferDialogState extends ConsumerState<NewTransferDialog> {
             final String targetBranch = _isThirdParty ? currentBranchCode : (_destination ?? currentBranchCode);
 
             if (_isDirectTransfer) {
-              transfersList.add(StockTransfer(
-                id: UuidUtils.generate(),
-                batchId: 'DIRECT',
-                meatType: _selectedBatchId!, // This is the product name
-                weight: double.tryParse(_weightController.text) ?? 0.0,
-                destination: targetBranch,
-                transferTime: now,
-                isThirdParty: _isThirdParty,
-                status: _isThirdParty ? TransferStatus.awaitingPayment : TransferStatus.pending,
-              ));
+              double amount = double.tryParse(_weightController.text) ?? 0.0;
+              if (amount > 0) {
+                if (_directUnit == WeightUnit.g) amount = WeightConverter.fromG(amount);
+                if (_directUnit == WeightUnit.lb) amount = WeightConverter.toKg(amount);
+
+                transfersList.add(StockTransfer(
+                  id: UuidUtils.generate(),
+                  batchId: 'DIRECT',
+                  meatType: _selectedBatchId!, // This is the product name
+                  weight: amount,
+                  unit: _directUnit == WeightUnit.unit ? 'unit' : 'kg',
+                  destination: targetBranch,
+                  transferTime: now,
+                  isThirdParty: _isThirdParty,
+                  status: _isThirdParty ? TransferStatus.awaitingPayment : TransferStatus.pending,
+                ));
+              }
             } else {
               for (final cutId in _selectedCutIds) {
                 final cut = availableCuts.firstWhere((c) => c.id == cutId);
-                
+                double amount = _cutWeights[cut.id] ?? cut.weight;
+                final unit = _cutUnits[cut.id] ?? WeightUnit.kg;
+
+                if (unit == WeightUnit.g) amount = WeightConverter.fromG(amount);
+                if (unit == WeightUnit.lb) amount = WeightConverter.toKg(amount);
+
                 transfersList.add(StockTransfer(
                   id: UuidUtils.generate(),
                   batchId: cut.batchId,
                   meatType: '${selectedBatch!.meatType} - ${cut.name}',
-                  weight: _cutWeights[cut.id] ?? cut.weight,
+                  weight: amount,
+                  unit: unit == WeightUnit.unit ? 'unit' : 'kg',
                   destination: targetBranch,
                   transferTime: now,
                   isThirdParty: _isThirdParty,
