@@ -139,7 +139,7 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
       children: [
         _buildSummaryCard('Total Customers', metrics.length.toString(), Icons.people, Colors.blue, theme),
         const SizedBox(width: AppSpacing.m),
-        _buildSummaryCard('VIP Customers', vips.toString(), Icons.stars, Colors.purple, theme),
+        _buildSummaryCard('VIPs & Favorites', vips.toString(), Icons.stars, Colors.purple, theme),
         const SizedBox(width: AppSpacing.m),
         _buildSummaryCard('Regulars', regulars.toString(), Icons.repeat, Colors.green, theme),
       ],
@@ -254,13 +254,29 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                               overflow: TextOverflow.ellipsis,
                             ),
                             if (m != null)
-                              Text(
-                                m.performanceLabel,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: m.performanceLabel == 'VIP' ? Colors.purple : (m.performanceLabel == 'Regular' ? Colors.blue : Colors.grey),
-                                  fontWeight: FontWeight.bold,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    m.performanceLabel,
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: m.performanceLabel == 'Bulk Buyer' ? Colors.orange.shade800 : (m.performanceLabel == 'VIP' ? Colors.purple : (m.performanceLabel == 'Regular' ? Colors.blue : Colors.grey)),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Container(width: 1, height: 8, color: Colors.grey.withValues(alpha: 0.3)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    c.isWholesaler ? 'WHOLESALER' : 'RETAILER',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: c.isWholesaler ? theme.colorScheme.primary : Colors.grey,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ],
                               ),
                           ],
                         ),
@@ -295,6 +311,11 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _buildMetricRow(Icons.phone_outlined, c.phone, theme),
+                              if (c.phone2 != null && c.phone2!.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2.0),
+                                  child: _buildMetricRow(Icons.phone_iphone_rounded, c.phone2!, theme),
+                                ),
                               const SizedBox(height: 4),
                               _buildMetricRow(Icons.shopping_bag_outlined, 'Orders: ${m?.visitCount ?? 0}', theme),
                               const SizedBox(height: 4),
@@ -387,8 +408,11 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController(text: customer.name);
     final phoneController = TextEditingController(text: customer.phone);
+    final phone2Controller = TextEditingController(text: customer.phone2 ?? '');
     final locationController = TextEditingController(text: customer.location ?? '');
     bool isFavorite = customer.isFavorite;
+    bool isBulkPurchaser = customer.isBulkPurchaser;
+    bool isWholesaler = customer.isWholesaler;
     final theme = Theme.of(context);
 
     showDialog(
@@ -412,7 +436,7 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: phoneController, 
-                    decoration: const InputDecoration(labelText: 'Phone Number', hintText: '10 digits', prefixIcon: Icon(Icons.phone_outlined)), 
+                    decoration: const InputDecoration(labelText: 'Primary Phone', hintText: '10 digits', prefixIcon: Icon(Icons.phone_outlined)), 
                     keyboardType: TextInputType.phone,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
@@ -423,6 +447,16 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                       if (v.length != 10) return 'Exactly 10 digits required';
                       return null;
                     },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: phone2Controller, 
+                    decoration: const InputDecoration(labelText: 'Alternative Phone (Optional)', prefixIcon: Icon(Icons.phone_iphone_rounded)), 
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -438,6 +472,36 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                     activeColor: theme.colorScheme.primary,
                     contentPadding: EdgeInsets.zero,
                   ),
+                  CheckboxListTile(
+                    title: const Text('Bulk Purchaser'),
+                    subtitle: const Text('Regular bulk buyer status'),
+                    value: isBulkPurchaser,
+                    onChanged: (val) => setState(() => isBulkPurchaser = val ?? false),
+                    activeColor: theme.colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Customer Category', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(child: Text('RETAILER')),
+                          selected: !isWholesaler,
+                          onSelected: (v) => setState(() => isWholesaler = false),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(child: Text('WHOLESALER')),
+                          selected: isWholesaler,
+                          onSelected: (v) => setState(() => isWholesaler = true),
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -450,8 +514,11 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                   final updatedCustomer = customer.copyWith(
                     name: nameController.text.trim(),
                     phone: phoneController.text.trim(),
+                    phone2: phone2Controller.text.trim().isEmpty ? null : phone2Controller.text.trim(),
                     location: locationController.text.trim().isEmpty ? null : locationController.text.trim(),
                     isFavorite: isFavorite,
+                    isBulkPurchaser: isBulkPurchaser,
+                    isWholesaler: isWholesaler,
                   );
                   
                   try {
@@ -484,8 +551,11 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
     final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
+    final phone2Controller = TextEditingController();
     final locationController = TextEditingController();
     bool isFavorite = false;
+    bool isBulkPurchaser = false;
+    bool isWholesaler = false;
     final theme = Theme.of(context);
 
     showDialog(
@@ -509,7 +579,7 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                   const SizedBox(height: 16),
                   TextFormField(
                     controller: phoneController, 
-                    decoration: const InputDecoration(labelText: 'Phone Number', hintText: '10 digits', prefixIcon: Icon(Icons.phone_outlined)), 
+                    decoration: const InputDecoration(labelText: 'Primary Phone', hintText: '10 digits', prefixIcon: Icon(Icons.phone_outlined)), 
                     keyboardType: TextInputType.phone,
                     inputFormatters: [
                       FilteringTextInputFormatter.digitsOnly,
@@ -520,6 +590,16 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                       if (v.length != 10) return 'Exactly 10 digits required';
                       return null;
                     },
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: phone2Controller, 
+                    decoration: const InputDecoration(labelText: 'Alternative Phone (Optional)', prefixIcon: Icon(Icons.phone_iphone_rounded)), 
+                    keyboardType: TextInputType.phone,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(10),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -534,6 +614,36 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                     onChanged: (val) => setState(() => isFavorite = val ?? false),
                     activeColor: theme.colorScheme.primary,
                     contentPadding: EdgeInsets.zero,
+                  ),
+                  CheckboxListTile(
+                    title: const Text('Bulk Purchaser'),
+                    subtitle: const Text('Regular bulk buyer status'),
+                    value: isBulkPurchaser,
+                    onChanged: (val) => setState(() => isBulkPurchaser = val ?? false),
+                    activeColor: theme.colorScheme.primary,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Customer Category', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(child: Text('RETAILER')),
+                          selected: !isWholesaler,
+                          onSelected: (v) => setState(() => isWholesaler = false),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Center(child: Text('WHOLESALER')),
+                          selected: isWholesaler,
+                          onSelected: (v) => setState(() => isWholesaler = true),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -550,8 +660,11 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                     id: uniqueUuid,
                     name: nameController.text.trim(),
                     phone: phoneController.text.trim(),
+                    phone2: phone2Controller.text.trim().isEmpty ? null : phone2Controller.text.trim(),
                     location: locationController.text.trim().isEmpty ? null : locationController.text.trim(),
                     isFavorite: isFavorite,
+                    isBulkPurchaser: isBulkPurchaser,
+                    isWholesaler: isWholesaler,
                   );
                   
                   try {

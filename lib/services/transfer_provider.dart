@@ -338,10 +338,11 @@ class TransferNotifier extends StateNotifier<List<StockTransfer>> {
           final cut = cutToMatch.toLowerCase();
           final animal = animalType.toLowerCase();
 
-          // Handle "Beef" vs "Cow" aliases
-          final bool catMatch = pCat == animal || 
-                              (pCat == 'cow' && animal == 'beef') || 
-                              (pCat == 'beef' && animal == 'cow');
+          // Handle category match with Beef/Cow flexibility
+          bool catMatch = pCat == animal;
+          if (!catMatch && (pCat == 'cow' || pCat == 'beef') && (animal == 'cow' || animal == 'beef')) {
+            catMatch = true;
+          }
 
           return (catMatch && pName == cut) || 
                  (catMatch && mType.contains(pName)) ||

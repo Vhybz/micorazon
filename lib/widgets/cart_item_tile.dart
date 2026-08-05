@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 class CartItemTile extends StatelessWidget {
   final String name;
+  final String? category;
   final String qty;
   final String weight;
   final String amount;
@@ -10,6 +11,7 @@ class CartItemTile extends StatelessWidget {
   const CartItemTile({
     super.key,
     required this.name,
+    this.category,
     required this.qty,
     required this.weight,
     required this.amount,
@@ -37,6 +39,8 @@ class CartItemTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (category != null)
+                  Text(category!.toUpperCase(), style: TextStyle(color: theme.colorScheme.primary, fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
                 Text(name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: theme.colorScheme.onSurface)),
                 Text('$qty x $weight', style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 11)),
               ],

@@ -1,5 +1,5 @@
-- [x] Implement name-splitting helper in `InventoryControlScreen`
-- [x] Update mobile and desktop layouts in `InventoryControlScreen` to use the new name builder
-- [x] Implement name-splitting helper in `ProductCard`
-- [x] Refine `ProductCard` layout to display name and range on separate lines
-- [x] Verify alignment and readability across all device views
+- [x] Update `butcher_service.dart`: Implement atomic stock increments in `finalizeChickenAsWhole` and `initiateBatchFromSlaughter`
+- [x] Update `slaughter_log_screen.dart`: Lock "PROCESSED" logs with a disabled button UI
+- [x] Update `inventory_control_screen.dart`: Refine stock unit labels ("birds", "pcs")
+- [x] Verify whole chicken and portioned part stock updates
+- [x] Confirm "PROCESSED" state persistence in Slaughter Log

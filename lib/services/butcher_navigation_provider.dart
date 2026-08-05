@@ -32,3 +32,6 @@ final butcherNavProvider = StateNotifierProvider<ButcherNavigationNotifier, Butc
 
 // Provider to hold the active log being broken down
 final activeSlaughterLogProvider = StateProvider<SlaughterLog?>((ref) => null);
+
+// Provider to hold the log being edited in AnimalIntakeScreen
+final editingSlaughterLogProvider = StateProvider<SlaughterLog?>((ref) => null);

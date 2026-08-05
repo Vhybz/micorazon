@@ -73,8 +73,13 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
       
       final matchesStatus = _statusFilter == null || sale.status == _statusFilter;
       
-      final matchesDate = (_startDate == null || sale.timestamp.isAfter(_startDate!)) &&
-                         (_endDate == null || sale.timestamp.isBefore(_endDate!.add(const Duration(days: 1))));
+      bool matchesDate = true;
+      if (_startDate != null && _endDate != null) {
+        final start = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+        final end = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, 23, 59, 59);
+        matchesDate = sale.timestamp.isAfter(start.subtract(const Duration(seconds: 1))) && 
+                      sale.timestamp.isBefore(end.add(const Duration(seconds: 1)));
+      }
 
       final matchesCashier = _cashierFilter == null || sale.cashierName == _cashierFilter;
 
@@ -161,6 +166,27 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
   }
 
   Widget _buildTransactionsTab(BuildContext context, List<SaleRecord> filteredSales) {
+    final theme = Theme.of(context);
+    final Map<String, ({double qty, String category})> productStatsMap = {};
+    double totalSales = 0;
+    double totalProfit = 0;
+
+    for (var sale in filteredSales) {
+      if (sale.status == SaleStatus.cancelled) continue;
+      totalSales += sale.totalAmount;
+      totalProfit += (sale.totalAmount - sale.totalCost);
+      for (var item in sale.items) {
+        final existing = productStatsMap[item.product.name];
+        productStatsMap[item.product.name] = (
+          qty: (existing?.qty ?? 0) + item.quantity,
+          category: item.product.category
+        );
+      }
+    }
+
+    final sortedProducts = productStatsMap.entries.toList()
+      ..sort((a, b) => b.value.qty.compareTo(a.value.qty));
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.l),
       child: Column(
@@ -170,6 +196,29 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
           const SizedBox(height: AppSpacing.xl),
           _buildFilters(),
           const SizedBox(height: AppSpacing.xl),
+          
+          // New Visual Insights
+          Row(
+            children: [
+              Expanded(child: _reportCard(context, 'Period Sales', '₵ ${totalSales.toStringAsFixed(2)}', Icons.payments, Colors.blue)),
+              const SizedBox(width: AppSpacing.m),
+              Expanded(child: _reportCard(context, 'Period Profit', '₵ ${totalProfit.toStringAsFixed(2)}', Icons.trending_up, Colors.green)),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xl),
+
+          Text('SALES TREND', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const SizedBox(height: 12),
+          _buildSalesTrendChart(filteredSales, theme),
+          const SizedBox(height: AppSpacing.xl),
+
+          if (sortedProducts.isNotEmpty) ...[
+            Text('HIGHEST PURCHASED PRODUCTS', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.bold, color: Colors.grey)),
+            const SizedBox(height: 12),
+            _buildTopProductsList(sortedProducts, theme),
+            const SizedBox(height: AppSpacing.xl),
+          ],
+
           _buildSalesTable(filteredSales),
         ],
       ),
@@ -209,7 +258,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     SizedBox(
                       width: constraints.maxWidth < 600 ? constraints.maxWidth : 180,
                       child: DropdownButtonFormField<String>(
-                        value: _cashierFilter,
+                        initialValue: _cashierFilter,
                         isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Sold By', border: OutlineInputBorder(), isDense: true),
                         items: [
@@ -224,7 +273,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     SizedBox(
                       width: constraints.maxWidth < 600 ? constraints.maxWidth : 160,
                       child: DropdownButtonFormField<PaymentMethod>(
-                        value: _paymentMethodFilter,
+                        initialValue: _paymentMethodFilter,
                         isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Payment', border: OutlineInputBorder(), isDense: true),
                         items: [
@@ -261,24 +310,14 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     ),
 
                     // Date
-                    TextButton.icon(
-                      onPressed: () async {
-                        final picked = await showDateRangePicker(
-                          context: context,
-                          firstDate: DateTime(2023),
-                          lastDate: DateTime.now(),
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            _startDate = picked.start;
-                            _endDate = picked.end;
-                          });
-                        }
-                      },
+                    OutlinedButton.icon(
+                      onPressed: () => _showDateFilterOptions(context),
                       icon: const Icon(Icons.date_range),
                       label: Text(_startDate == null
                           ? 'Filter Date'
-                          : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}'),
+                          : _startDate!.day == _endDate!.day && _startDate!.month == _endDate!.month && _startDate!.year == _endDate!.year
+                              ? DateFormat('MM/dd').format(_startDate!)
+                              : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}'),
                     ),
 
                     if (_startDate != null || _statusFilter != null || _searchQuery.isNotEmpty || _cashierFilter != null || _paymentMethodFilter != null || _minTotal != null || _maxTotal != null)
@@ -441,7 +480,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
   }
 
   Widget _buildSummaryCards(BuildContext context, List<SaleRecord> sales, List<dynamic> expenses) {
-    final totalRevenue = sales.where((s) => s.isActive).fold(0.0, (sum, sale) => sum + sale.totalAmount);
+    final totalRevenue = sales.where((s) => s.status != SaleStatus.cancelled).fold(0.0, (sum, sale) => sum + sale.totalAmount);
     final totalExpenses = expenses.fold(0.0, (sum, e) => sum + (e.amount as double));
     final netProfit = totalRevenue - totalExpenses;
 
@@ -529,7 +568,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
         s.timestamp.day == date.day && 
         s.timestamp.month == date.month && 
         s.timestamp.year == date.year &&
-        s.isActive
+        s.status != SaleStatus.cancelled
       );
       
       dailyRevenue[i] = daySales.fold(0.0, (sum, s) => sum + s.totalAmount);
@@ -771,6 +810,82 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     );
   }
 
+  void _showDateFilterOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.today),
+            title: const Text('Today'),
+            onTap: () {
+              final now = DateTime.now();
+              setState(() {
+                _startDate = now;
+                _endDate = now;
+              });
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('Yesterday'),
+            onTap: () {
+              final yesterday = DateTime.now().subtract(const Duration(days: 1));
+              setState(() {
+                _startDate = yesterday;
+                _endDate = yesterday;
+              });
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.calendar_today),
+            title: const Text('Specific Day'),
+            onTap: () async {
+              Navigator.pop(context);
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _startDate ?? DateTime.now(),
+                firstDate: DateTime(2023),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) {
+                setState(() {
+                  _startDate = picked;
+                  _endDate = picked;
+                });
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.date_range),
+            title: const Text('Date Range'),
+            onTap: () async {
+              Navigator.pop(context);
+              final picked = await showDateRangePicker(
+                context: context,
+                initialDateRange: (_startDate != null && _endDate != null) 
+                  ? DateTimeRange(start: _startDate!, end: _endDate!) 
+                  : null,
+                firstDate: DateTime(2023),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) {
+                setState(() {
+                  _startDate = picked.start;
+                  _endDate = picked.end;
+                });
+              }
+            },
+          ),
+          const SizedBox(height: AppSpacing.l),
+        ],
+      ),
+    );
+  }
+
   void _showSaleDetails(BuildContext context, SaleRecord sale) {
     showDialog(
       context: context,
@@ -859,10 +974,16 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                               children: [
                                 Expanded(
                                   flex: 3,
-                                  child: Text(item.product.name, 
-                                    style: TextStyle(color: theme.colorScheme.onSurface),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(item.product.category.toUpperCase(), style: TextStyle(color: theme.colorScheme.primary, fontSize: 8, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                      Text(item.product.name, 
+                                        style: TextStyle(color: theme.colorScheme.onSurface),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -1309,5 +1430,174 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
       case SaleStatus.reversed: return Colors.red.shade900;
       case SaleStatus.awaitingDeposit: return Colors.purple;
     }
+  }
+
+  Widget _buildSalesTrendChart(List<SaleRecord> sales, ThemeData theme) {
+    if (sales.isEmpty) return const SizedBox.shrink();
+
+    // Group by day for the last 7 days or filtered range
+    final List<DateTime> dates = [];
+    final now = DateTime.now();
+    bool isSingleDay = false;
+    
+    if (_startDate != null && _endDate != null) {
+      DateTime d = _startDate!;
+      while (d.isBefore(_endDate!.add(const Duration(days: 1)))) {
+        dates.add(DateTime(d.year, d.month, d.day));
+        d = d.add(const Duration(days: 1));
+      }
+      if (dates.length == 1) isSingleDay = true;
+    } else {
+      for (int i = 6; i >= 0; i--) {
+        final d = now.subtract(Duration(days: i));
+        dates.add(DateTime(d.year, d.month, d.day));
+      }
+    }
+
+    final List<double> chartData;
+    final List<String> labels;
+
+    if (isSingleDay) {
+      final targetDate = dates.first;
+      final hours = [8, 10, 12, 14, 16, 18, 20];
+      chartData = hours.map((h) {
+        return sales
+            .where((s) => s.timestamp.year == targetDate.year && 
+                          s.timestamp.month == targetDate.month && 
+                          s.timestamp.day == targetDate.day &&
+                          s.timestamp.hour >= h && s.timestamp.hour < h + 2 &&
+                          s.isActive)
+            .fold(0.0, (sum, s) => sum + s.totalAmount);
+      }).toList();
+      labels = hours.map((h) => '${h > 12 ? h - 12 : h}${h >= 12 ? 'pm' : 'am'}').toList();
+    } else {
+      chartData = dates.map((date) {
+        return sales
+            .where((s) => s.timestamp.year == date.year && s.timestamp.month == date.month && s.timestamp.day == date.day && s.isActive)
+            .fold(0.0, (sum, s) => sum + s.totalAmount);
+      }).toList();
+      labels = dates.map((d) => DateFormat('E').format(d).substring(0, 1)).toList();
+    }
+
+    final maxTotal = chartData.isEmpty ? 100.0 : (chartData.reduce((a, b) => a > b ? a : b) + 50.0);
+
+    return Container(
+      height: 250,
+      padding: const EdgeInsets.all(AppSpacing.l),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: BarChart(
+        BarChartData(
+          alignment: BarChartAlignment.spaceAround,
+          maxY: maxTotal,
+          barTouchData: BarTouchData(
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipColor: (_) => theme.colorScheme.primary,
+              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                return BarTooltipItem(
+                  '₵${rod.toY.toStringAsFixed(0)}',
+                  const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10),
+                );
+              },
+            ),
+          ),
+          titlesData: FlTitlesData(
+            show: true,
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                getTitlesWidget: (value, meta) {
+                  final index = value.toInt();
+                  if (index >= 0 && index < labels.length) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text(
+                        labels[index],
+                        style: const TextStyle(fontSize: 10, color: Colors.grey),
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+                reservedSize: 28,
+              ),
+            ),
+            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          ),
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          barGroups: List.generate(chartData.length, (index) {
+            return BarChartGroupData(
+              x: index,
+              barRods: [
+                BarChartRodData(
+                  toY: chartData[index],
+                  color: theme.colorScheme.primary,
+                  width: isSingleDay ? 24 : (chartData.length > 10 ? 8 : 16),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                ),
+              ],
+            );
+          }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopProductsList(List<MapEntry<String, ({double qty, String category})>> sortedProducts, ThemeData theme) {
+    final totalQty = sortedProducts.fold(0.0, (sum, e) => sum + e.value.qty);
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.l),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      child: Column(
+        children: sortedProducts.take(10).map((e) {
+          final double percentage = totalQty > 0 ? (e.value.qty / totalQty) : 0;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(e.key, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                          Text(e.value.category.toUpperCase(), style: TextStyle(fontSize: 9, color: theme.colorScheme.primary, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                        ],
+                      ),
+                    ),
+                    Text('${e.value.qty.toStringAsFixed(1)} units', 
+                      style: TextStyle(color: theme.colorScheme.primary, fontWeight: FontWeight.w900, fontSize: 13)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: percentage,
+                    minHeight: 8,
+                    backgroundColor: theme.dividerColor,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
   }
 }

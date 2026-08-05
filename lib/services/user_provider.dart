@@ -275,7 +275,14 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
     }
   }
 
-  Future<void> updateSalary(String userId, {double? amount, int? day, DateTime? lastPaid, bool? isAdvance}) async {
+  Future<void> updateSalary(String userId, {
+    double? amount, 
+    int? day, 
+    DateTime? lastPaid, 
+    bool? isAdvance,
+    double? addSalaryPaid,
+    double? addAdvanceTaken,
+  }) async {
     try {
       final user = await _getUser(userId);
       if (user != null) {
@@ -285,6 +292,8 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
           salaryDay: day,
           lastSalaryDate: lastPaid,
           lastPaymentWasAdvance: isAdvance,
+          totalSalaryPaid: user.totalSalaryPaid + (addSalaryPaid ?? 0),
+          totalAdvancesTaken: user.totalAdvancesTaken + (addAdvanceTaken ?? 0),
         );
         
         _updateLocalAndSession(updatedUser);
@@ -293,6 +302,8 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
         final Map<String, dynamic> updates = {
           'salary_amount': amount,
           'salary_day': day,
+          'total_salary_paid': updatedUser.totalSalaryPaid,
+          'total_advances_taken': updatedUser.totalAdvancesTaken,
         };
         
         if (lastPaid != null) {

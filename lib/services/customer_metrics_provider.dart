@@ -23,6 +23,8 @@ final customerMetricsProvider = Provider<Map<String, CustomerMetric>>((ref) {
         visitCount: 0,
         averageOrderValue: 0,
         recentSpends: [],
+        isFavorite: customer.isFavorite,
+        isBulkPurchaser: customer.isBulkPurchaser,
       );
       continue;
     }
@@ -41,6 +43,8 @@ final customerMetricsProvider = Provider<Map<String, CustomerMetric>>((ref) {
       averageOrderValue: totalSpend / visitCount,
       lastVisit: lastVisit,
       recentSpends: recentSpends,
+      isFavorite: customer.isFavorite,
+      isBulkPurchaser: customer.isBulkPurchaser,
     );
   }
 

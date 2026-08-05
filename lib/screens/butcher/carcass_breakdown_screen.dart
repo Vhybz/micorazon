@@ -23,6 +23,7 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
   bool _isSaving = false;
   String? _errorMessage;
   double _totalAccounted = 0;
+  bool _isLegSeparated = false;
 
   @override
   void initState() {
@@ -108,6 +109,10 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
                         children: [
                           if (_errorMessage != null) _buildErrorBanner(),
                           _buildIntakeSummary(log),
+                          if (log.type == AnimalType.hardChicken || log.type == AnimalType.softChicken) ...[
+                            const SizedBox(height: AppSpacing.l),
+                            _buildLegConfigToggle(),
+                          ],
                           const SizedBox(height: AppSpacing.xl),
                           _buildCutsGrid(log),
                           const SizedBox(height: AppSpacing.xl),
@@ -241,6 +246,37 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
     );
   }
 
+  Widget _buildLegConfigToggle() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primaryMaroon.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        border: Border.all(color: AppColors.primaryMaroon.withValues(alpha: 0.1)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.settings_outlined, size: 20, color: AppColors.primaryMaroon),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('LEG PORTIONING MODE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                Text('Toggle ON to record Thighs and Drumsticks as separate items.', style: TextStyle(fontSize: 10, color: AppColors.textLight)),
+              ],
+            ),
+          ),
+          Switch(
+            value: _isLegSeparated, 
+            onChanged: (v) => setState(() => _isLegSeparated = v),
+            activeThumbColor: AppColors.primaryMaroon,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _summaryItem(String label, String value, IconData icon) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -296,15 +332,46 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
   }
 
   Widget _buildCutInput(String name) {
+    final log = ref.read(activeSlaughterLogProvider);
+    final isChicken = log?.type == AnimalType.softChicken || log?.type == AnimalType.hardChicken;
+    
+    bool isThigh = name.contains('Thigh');
+    bool isDrum = name.contains('Drumstick');
+    bool isDisabled = false;
+    
+    String displayCutName = (isChicken && log?.chickenRangeLabel != null) 
+        ? '$name (${log!.chickenRangeLabel})'
+        : name;
+
+    if (isChicken) {
+      if (isThigh) {
+        final drumKey = _controllers.keys.firstWhere((k) => k.contains('Drumstick'), orElse: () => '');
+        final hasDrumWeight = drumKey.isNotEmpty && (double.tryParse(_controllers[drumKey]!.text) ?? 0) > 0;
+        if (!_isLegSeparated && hasDrumWeight) {
+          isDisabled = true;
+          displayCutName = '$displayCutName (Separated)';
+        } else if (!_isLegSeparated) {
+          displayCutName = '$displayCutName (Whole Leg)';
+        }
+      } else if (isDrum) {
+        final thighKey = _controllers.keys.firstWhere((k) => k.contains('Thigh'), orElse: () => '');
+        final hasThighWeight = thighKey.isNotEmpty && (double.tryParse(_controllers[thighKey]!.text) ?? 0) > 0;
+        if (!_isLegSeparated && hasThighWeight) {
+          isDisabled = true;
+          displayCutName = '$displayCutName (Included in Thigh)';
+        }
+      }
+    }
+
     final WeightUnit unit = _units[name] ?? WeightUnit.kg;
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDisabled ? Colors.grey.shade50 : Colors.white,
         borderRadius: BorderRadius.circular(AppRadius.m),
-        border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 5)],
+        border: Border.all(color: isDisabled ? Colors.grey.shade200 : Colors.grey.shade200),
+        boxShadow: isDisabled ? [] : [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 5)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -313,41 +380,48 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
-                child: Text(name, 
-                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold), 
-                  maxLines: 1, 
+                child: Text(displayCutName, 
+                  style: TextStyle(
+                    fontSize: 10, 
+                    fontWeight: FontWeight.bold,
+                    color: isDisabled ? Colors.grey : Colors.black,
+                  ), 
+                  maxLines: 2, 
                   overflow: TextOverflow.ellipsis
                 ),
               ),
-              GestureDetector(
-                onTap: () {
-                  setState(() {
-                    // Cycle through: kg -> g -> lb -> unit
-                    final nextIndex = (unit.index + 1) % WeightUnit.values.length;
-                    _units[name] = WeightUnit.values[nextIndex];
-                    _calculateTotals();
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: unit == WeightUnit.unit ? Colors.blue.shade50 : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: unit == WeightUnit.unit ? Colors.blue.shade200 : Colors.grey.shade300),
-                  ),
-                  child: Text(unit == WeightUnit.unit ? 'pcs' : unit.name, 
-                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: unit == WeightUnit.unit ? Colors.blue : Colors.grey.shade700)
+              if (!isDisabled)
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      // Cycle through: kg -> g -> lb -> unit
+                      final nextIndex = (unit.index + 1) % WeightUnit.values.length;
+                      _units[name] = WeightUnit.values[nextIndex];
+                      _calculateTotals();
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: unit == WeightUnit.unit ? Colors.blue.shade50 : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: unit == WeightUnit.unit ? Colors.blue.shade200 : Colors.grey.shade300),
+                    ),
+                    child: Text(unit == WeightUnit.unit ? 'pcs' : unit.name, 
+                      style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: unit == WeightUnit.unit ? Colors.blue : Colors.grey.shade700)
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
           const Spacer(),
           TextField(
             controller: _controllers[name],
+            enabled: !isDisabled,
+            onChanged: (_) => _calculateTotals(),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: isDisabled ? Colors.grey : Colors.black),
             decoration: InputDecoration(
               isDense: true,
               contentPadding: EdgeInsets.zero,
@@ -408,29 +482,90 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
 
   Widget _buildBottomAction(SlaughterLog log) {
     final theme = Theme.of(context);
+    final isChicken = log.type == AnimalType.softChicken || log.type == AnimalType.hardChicken;
+
     return Container(
       padding: const EdgeInsets.all(AppSpacing.l),
       decoration: BoxDecoration(
         color: theme.cardColor,
         border: Border(top: BorderSide(color: theme.dividerColor)),
       ),
-      child: SizedBox(
-        width: double.infinity,
-        height: 55,
-        child: ElevatedButton.icon(
-          onPressed: _isSaving ? null : _handleSave,
-          icon: _isSaving 
-            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-            : const Icon(Icons.check_circle_outline),
-          label: const Text('SAVE CARCASS & PROCEED', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primaryMaroon,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isChicken) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: OutlinedButton.icon(
+                onPressed: _isSaving ? null : () => _handleSaveWhole(log),
+                icon: const Icon(Icons.shopping_basket_outlined, color: Colors.green),
+                label: Text('SAVE AS WHOLE (${log.chickenRangeLabel ?? "RANGE MISSING"})', 
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: log.chickenRangeLabel == null ? Colors.red : Colors.green)),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: log.chickenRangeLabel == null ? Colors.red : Colors.green),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          SizedBox(
+            width: double.infinity,
+            height: 55,
+            child: ElevatedButton.icon(
+              onPressed: _isSaving ? null : _handleSave,
+              icon: _isSaving 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Icon(Icons.check_circle_outline),
+              label: Text(isChicken ? 'SAVE FOR PORTIONING' : 'SAVE CARCASS & PROCEED', 
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryMaroon,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     );
+  }
+
+  Future<void> _handleSaveWhole(SlaughterLog log) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Save as Whole Chickens?'),
+        content: Text('This will add ${log.quantity} units directly to the Whole Chicken inventory and bypass the portioning phase. Continue?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            child: const Text('CONFIRM'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isSaving = true);
+    try {
+      await ref.read(slaughterLogsProvider.notifier).finalizeChickenAsWhole(log);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Whole chickens added to shop stock!'), backgroundColor: Colors.green),
+        );
+        ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.slaughterLog);
+      }
+    } catch (e) {
+      setState(() {
+        _isSaving = false;
+        _errorMessage = 'Error: ${e.toString()}';
+      });
+    }
   }
 
   Future<void> _handleSave() async {
@@ -505,9 +640,14 @@ class _CarcassBreakdownScreenState extends ConsumerState<CarcassBreakdownScreen>
             if (unit == WeightUnit.g) finalVal = WeightConverter.fromG(value);
           }
 
+          final bool isChickenType = log.type == AnimalType.softChicken || log.type == AnimalType.hardChicken;
+          final String finalName = (isChickenType && cutName.toUpperCase() != 'GIZZARD' && log.chickenRangeLabel != null)
+              ? '$cutName (${log.chickenRangeLabel})'
+              : cutName;
+
           meatCuts.add(MeatCut(
             id: UuidUtils.generate(),
-            name: cutName,
+            name: finalName,
             meatType: log.type.displayName,
             batchId: log.id,
             weight: finalVal,

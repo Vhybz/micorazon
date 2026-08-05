@@ -4,6 +4,7 @@ class SalaryRecord {
   final double amount;
   final bool isAdvance;
   final DateTime date;
+  final DateTime targetMonth;
   final String? note;
 
   SalaryRecord({
@@ -12,6 +13,7 @@ class SalaryRecord {
     required this.amount,
     required this.isAdvance,
     required this.date,
+    required this.targetMonth,
     this.note,
   });
 
@@ -21,6 +23,7 @@ class SalaryRecord {
     'amount': amount,
     'is_advance': isAdvance,
     'date': date.toIso8601String(),
+    'target_month': targetMonth.toIso8601String(),
     'note': note,
   };
 
@@ -30,6 +33,9 @@ class SalaryRecord {
     amount: (json['amount'] as num).toDouble(),
     isAdvance: json['is_advance'] ?? false,
     date: DateTime.parse(json['date']),
+    targetMonth: json['target_month'] != null 
+        ? DateTime.parse(json['target_month']) 
+        : DateTime.parse(json['date']),
     note: json['note'],
   );
 }

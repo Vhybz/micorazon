@@ -55,8 +55,8 @@ class ProductCard extends StatelessWidget {
         Text(range, 
           style: baseStyle.copyWith(
             fontSize: baseStyle.fontSize! - 2, 
-            color: baseStyle.color?.withValues(alpha: 0.7) ?? Colors.black54,
-            fontWeight: FontWeight.normal,
+            color: Colors.orange.shade800,
+            fontWeight: FontWeight.bold,
           ), 
           maxLines: 1, 
           overflow: TextOverflow.ellipsis

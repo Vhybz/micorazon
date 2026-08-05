@@ -7,7 +7,7 @@ class SupabaseButcherService {
   Future<List<SlaughterLog>> getSlaughterLogs(String branchCode) async {
     final response = await _client
         .from('slaughter_logs')
-        .select('*, animals(tag_number)')
+        .select('*, animals(tag_number, source_farm)')
         .eq('branch_code', branchCode)
         .order('slaughter_time', ascending: false, nullsFirst: true);
     
@@ -15,6 +15,7 @@ class SupabaseButcherService {
       final Map<String, dynamic> data = Map<String, dynamic>.from(json);
       if (data['animals'] != null) {
         data['tag_number'] = data['animals']['tag_number'];
+        data['source_farm'] = data['animals']['source_farm'];
       }
       return SlaughterLog.fromJson(data);
     }).toList();
@@ -29,18 +30,35 @@ class SupabaseButcherService {
         .map((data) => data.map((json) => SlaughterLog.fromJson(json)).toList());
   }
 
-  Future<void> addAnimal(String branchCode, String animalUuid, String tagNumber, AnimalType type, double weight, String sourceFarm, {int quantity = 1}) async {
+  Future<void> addAnimal(String branchCode, String animalUuid, String tagNumber, AnimalType type, double weight, String sourceFarm, {int quantity = 1, double? price, double? farmPrice, String? manualFarmTag}) async {
     await _client.from('animals').insert({
       'id': animalUuid,
       'tag_number': tagNumber,
+      'manual_farm_tag': manualFarmTag,
       'branch_code': branchCode,
       'type': type.name,
       'quantity': quantity,
       'weight': weight,
+      'purchase_price': price ?? 0,
       'source_farm': sourceFarm,
       'status': 'waiting',
       'arrival_time': DateTime.now().toIso8601String(),
     });
+  }
+
+  Future<void> updateAnimal(String id, {String? tagNumber, String? manualFarmTag, AnimalType? type, int? quantity, double? weight, double? price, String? sourceFarm}) async {
+    final Map<String, dynamic> updateData = {};
+    if (tagNumber != null) updateData['tag_number'] = tagNumber;
+    if (manualFarmTag != null) updateData['manual_farm_tag'] = manualFarmTag;
+    if (type != null) updateData['type'] = type.name;
+    if (quantity != null) updateData['quantity'] = quantity;
+    if (weight != null) updateData['weight'] = weight;
+    if (price != null) updateData['purchase_price'] = price;
+    if (sourceFarm != null) updateData['source_farm'] = sourceFarm;
+
+    if (updateData.isNotEmpty) {
+      await _client.from('animals').update(updateData).eq('id', id);
+    }
   }
 
   Future<void> addSlaughterLog(SlaughterLog log) async {
@@ -54,17 +72,29 @@ class SupabaseButcherService {
         .eq('id', log.id);
   }
 
-  Future<void> updateSlaughterStatus(String id, SlaughterStatus status, {DateTime? time}) async {
+  Future<void> updateSlaughterStatus(String id, SlaughterStatus status, {DateTime? time, String? slaughteredBy, String? portionedBy}) async {
     final Map<String, dynamic> updateData = {
       'status': status.name,
     };
     if (time != null) {
       updateData['slaughter_time'] = time.toIso8601String();
     }
+    if (slaughteredBy != null) {
+      updateData['slaughtered_by'] = slaughteredBy;
+    }
+    if (portionedBy != null) {
+      updateData['portioned_by'] = portionedBy;
+    }
     await _client
         .from('slaughter_logs')
         .update(updateData)
         .eq('id', id);
+  }
+
+  Future<void> deleteSlaughterIntake(String logId, String animalId) async {
+    // Delete log first due to foreign key (actually animal is referenced by log, so log first)
+    await _client.from('slaughter_logs').delete().eq('id', logId);
+    await _client.from('animals').delete().eq('id', animalId);
   }
 
   Future<List<MeatBatch>> getActiveBatches(String branchCode) async {
@@ -94,6 +124,7 @@ class SupabaseButcherService {
     await _client.from('meat_batches').insert({
       'id': batch.id,
       'branch_code': batch.branchCode,
+      'animal_id': batch.animalId,
       'meat_type': batch.meatType,
       'initial_weight': batch.weight,
       'current_weight': batch.weight,
@@ -101,6 +132,9 @@ class SupabaseButcherService {
       'source_name': batch.source.name,
       'source_location': batch.source.location,
       'owner_name': batch.source.owner,
+      'inspected_by': batch.inspectedBy,
+      'received_by': batch.receivedBy,
+      'portioned_by': batch.portionedBy,
       'created_at': batch.createdAt.toIso8601String(),
     });
   }

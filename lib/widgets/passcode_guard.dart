@@ -114,12 +114,14 @@ class _PasscodeGuardState extends ConsumerState<PasscodeGuard> {
                 try {
                   final response = await ref.read(authServiceProvider).signIn(user.email, controller.text);
                   if (response.user != null) {
-                    Navigator.pop(context, true);
+                    if (context.mounted) Navigator.pop(context, true);
                   }
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Invalid password: ${e.toString()}'), backgroundColor: Colors.red),
-                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Invalid password: ${e.toString()}'), backgroundColor: Colors.red),
+                    );
+                  }
                 } finally {
                   setDialogState(() => _isVerifyingPassword = false);
                 }

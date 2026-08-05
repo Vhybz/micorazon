@@ -6,6 +6,8 @@ class CustomerMetric {
   final double averageOrderValue;
   final DateTime? lastVisit;
   final List<double> recentSpends;
+  final bool isFavorite;
+  final bool isBulkPurchaser;
 
   CustomerMetric({
     required this.customerPhone,
@@ -15,10 +17,13 @@ class CustomerMetric {
     required this.averageOrderValue,
     this.lastVisit,
     this.recentSpends = const [],
+    this.isFavorite = false,
+    this.isBulkPurchaser = false,
   });
 
   String get performanceLabel {
-    if (totalSpend > 500) return 'VIP';
+    if (isBulkPurchaser) return 'Bulk Buyer';
+    if (isFavorite || totalSpend > 500) return 'VIP';
     if (visitCount > 5) return 'Regular';
     return 'Occasional';
   }

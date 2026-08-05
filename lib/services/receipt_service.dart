@@ -169,7 +169,7 @@ class ReceiptService {
               ...sale.payments.map((p) => pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     children: [
-                      pw.Text('METHOD: ${_formatMethod(p.method)}', style: pw.TextStyle(font: font, fontSize: 8)),
+                      pw.Text('METHOD: ${_formatMethod(p)}', style: pw.TextStyle(font: font, fontSize: 8)),
                       pw.Text('₵ ${p.amount.toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 8)),
                     ],
                   )),
@@ -272,10 +272,10 @@ static String _generateQRData(SaleRecord sale) {
     return buffer.toString();
   }
 
-  static String _formatMethod(PaymentMethod method) {
-    switch (method) {
+  static String _formatMethod(PaymentDetail p) {
+    switch (p.method) {
       case PaymentMethod.cash: return 'CASH';
-      case PaymentMethod.mobileMoney: return 'MOMO';
+      case PaymentMethod.mobileMoney: return p.isPaystack ? 'MOMO (PAYSTACK)' : 'MOMO';
       case PaymentMethod.bankDeposit: return 'BANK';
     }
   }
@@ -952,6 +952,7 @@ static String _generateQRData(SaleRecord sale) {
                     decoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF6B1111)),
                     children: [
                       _tableHeader('Date', boldFont),
+                      _tableHeader('For Month', boldFont),
                       _tableHeader('Type', boldFont),
                       _tableHeader('Note', boldFont),
                       _tableHeader('Amount', boldFont),
@@ -962,6 +963,7 @@ static String _generateQRData(SaleRecord sale) {
                     return pw.TableRow(
                       children: [
                         _tableCell(DateFormat('yyyy-MM-dd').format(r.date), font, color: color),
+                        _tableCell(DateFormat('MMMM yyyy').format(r.targetMonth), font, color: color),
                         _tableCell(r.isAdvance ? 'ADVANCE' : 'FULL', boldFont, color: color),
                         _tableCell(r.note ?? '--', font, color: color),
                         _tableCell(r.amount.toStringAsFixed(2), boldFont, color: color),
@@ -1002,7 +1004,7 @@ static String _generateQRData(SaleRecord sale) {
     }
   }
 
-  static Future<void> printPayslip(UserAccount user, double amount, bool isAdvance, {String? note}) async {
+  static Future<void> printPayslip(UserAccount user, double amount, bool isAdvance, {String? note, DateTime? targetMonth}) async {
     try {
       final doc = pw.Document();
       
@@ -1037,7 +1039,9 @@ static String _generateQRData(SaleRecord sale) {
                 _payslipRow('Staff Name:', user.name, font, boldFont),
                 _payslipRow('Staff ID:', user.id.substring(user.id.length - 8).toUpperCase(), font, boldFont),
                 _payslipRow('Role:', user.role.name.toUpperCase(), font, boldFont),
-                _payslipRow('Date:', DateFormat('yyyy-MM-dd').format(DateTime.now()), font, boldFont),
+                _payslipRow('Date Paid:', DateFormat('yyyy-MM-dd').format(DateTime.now()), font, boldFont),
+                if (targetMonth != null)
+                  _payslipRow('For Month:', DateFormat('MMMM yyyy').format(targetMonth), font, boldFont),
                 pw.Divider(thickness: 0.5),
                 pw.SizedBox(height: 5),
                 pw.Row(

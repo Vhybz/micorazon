@@ -579,8 +579,8 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
     AnimalType? animalType;
     for (var type in AnimalType.values) {
       if (type.name[0].toUpperCase() + type.name.substring(1) == batch.meatType || 
-          (type == AnimalType.hardChicken && batch.meatType == 'Hard Chicken (Layers)') ||
-          (type == AnimalType.softChicken && batch.meatType == 'Soft Chicken (Broilers)') ||
+          (type == AnimalType.hardChicken && (batch.meatType == 'Hard Chicken (Layers)' || batch.meatType == 'HARD CHICKEN (LAYER)')) ||
+          (type == AnimalType.softChicken && (batch.meatType == 'Soft Chicken (Broilers)' || batch.meatType == 'SOFT CHICKEN (BROILER)')) ||
           (type.displayName.toUpperCase() == batch.meatType.toUpperCase())) {
         animalType = type;
         break;
@@ -843,7 +843,7 @@ class _MeatProcessingScreenState extends ConsumerState<MeatProcessingScreen> {
 
   IconData _getAnimalIcon(String type) {
     final t = type.toLowerCase();
-    if (t.contains('cow') || t.contains('bull') || t.contains('beef')) return Icons.pets;
+    if (t.contains('cow') || t.contains('bull')) return Icons.pets;
     if (t.contains('pig') || t.contains('pork')) return Icons.set_meal_rounded;
     if (t.contains('chicken') || t.contains('poultry')) return Icons.egg;
     return Icons.restaurant;

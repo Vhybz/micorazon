@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:intl/intl.dart';
 import '../models/sale_model.dart';
 import '../models/user_model.dart';
 
@@ -235,11 +236,20 @@ class SmsService {
     required double amount,
     required bool isAdvance,
     String? note,
+    DateTime? targetMonth,
+    bool isUpdate = false,
   }) async {
     if (phone.isEmpty) return false;
-    final String typeHeader = isAdvance ? 'ADVANCE PAYMENT ALERT: ' : 'SALARY PAYMENT CONFIRMATION: ';
+    
+    final String typeHeader = isUpdate 
+        ? 'PAYMENT UPDATE: ' 
+        : (isAdvance ? 'ADVANCE PAYMENT ALERT: ' : 'SALARY PAYMENT CONFIRMATION: ');
+    
     final String type = isAdvance ? 'an advance' : 'your salary payment';
-    String message = '${typeHeader}Hello $firstName, you have received $type of GHS ${amount.toStringAsFixed(2)}.';
+    final String monthText = targetMonth != null ? ' for ${DateFormat('MMMM yyyy').format(targetMonth)}' : '';
+    
+    String message = '${typeHeader}Hello $firstName, you have received $type of GHS ${amount.toStringAsFixed(2)}$monthText.';
+    
     if (note != null && note.isNotEmpty) {
       message += ' Note: $note';
     }

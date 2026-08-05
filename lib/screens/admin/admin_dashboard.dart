@@ -39,12 +39,12 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
 
   final List<String> _bannerImages = [
     'assets/images/meat_art.jpg',
-    'assets/images/beef_art.jpg',
+    'assets/images/cow_art.jpg',
     'assets/images/pork_art.jpg',
-    'assets/images/beef_art2.jpg',
-    'assets/images/butcher_beef.jpg',
+    'assets/images/cow_art2.jpg',
+    'assets/images/butcher_cow.jpg',
     'assets/images/meat_on_scale.jpg',
-    'assets/images/beef.jpg',
+    'assets/images/cow.jpg',
     'assets/images/pork.jpg',
     'assets/images/chicken.jpg',
   ];

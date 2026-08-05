@@ -149,7 +149,7 @@ class _BatchManagementScreenState extends ConsumerState<BatchManagementScreen> {
             ),
           ),
           _filterDropdown('Status', _statusFilter, ['transporting', 'received', 'preparing', 'mincing', 'cutting', 'packaging', 'frozen'], (v) => setState(() => _statusFilter = v)),
-          _filterDropdown('Meat Type', _typeFilter, ['Beef', 'Pork', 'Chicken', 'Goat', 'Sheep'], (v) => setState(() => _typeFilter = v)),
+          _filterDropdown('Meat Type', _typeFilter, ['Beef', 'Cow', 'Pork', 'Hard Chicken (Layer)', 'Soft Chicken (Broiler)', 'Goat', 'Sheep'], (v) => setState(() => _typeFilter = v)),
           if (_searchQuery.isNotEmpty || _statusFilter != null || _typeFilter != null)
             TextButton.icon(
               onPressed: () => setState(() {

@@ -280,6 +280,7 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
           branchCode: sale.branchCode,
           name: sale.customerName ?? 'Walk-in Debtor',
           phone: sale.customerPhone!,
+          phone2: null,
           location: 'Auto-added from Debt Sale',
         );
         // addCustomer is optimistic and non-blocking

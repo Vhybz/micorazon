@@ -20,6 +20,10 @@ class SupabaseExpenseService {
     await _client.from('expenses').insert(expense.toJson());
   }
 
+  Future<void> updateExpense(ExpenseRecord expense) async {
+    await _client.from('expenses').update(expense.toJson()).eq('id', expense.id);
+  }
+
   Future<void> deleteExpense(String id) async {
     await _client.from('expenses').delete().eq('id', id);
   }

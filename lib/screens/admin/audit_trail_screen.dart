@@ -136,7 +136,7 @@ class _AuditTrailScreenState extends ConsumerState<AuditTrailScreen> {
           SizedBox(
             width: 200,
             child: DropdownButtonFormField<String>(
-              value: _selectedAction,
+              initialValue: _selectedAction,
               decoration: const InputDecoration(labelText: 'Action Type', isDense: true, border: OutlineInputBorder()),
               items: [
                 const DropdownMenuItem(value: null, child: Text('All Actions')),
@@ -146,10 +146,14 @@ class _AuditTrailScreenState extends ConsumerState<AuditTrailScreen> {
               onChanged: (v) => setState(() => _selectedAction = v),
             ),
           ),
-          TextButton.icon(
-            onPressed: _pickDateRange,
+          OutlinedButton.icon(
+            onPressed: _showDateFilterOptions,
             icon: const Icon(Icons.date_range),
-            label: Text(_startDate == null ? 'Filter Date' : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}'),
+            label: Text(_startDate == null 
+              ? 'Filter Date' 
+              : _startDate!.day == _endDate!.day && _startDate!.month == _endDate!.month && _startDate!.year == _endDate!.year
+                ? DateFormat('MM/dd').format(_startDate!)
+                : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}'),
           ),
           if (_startDate != null || _selectedAction != null || _searchQuery.isNotEmpty)
             IconButton(
@@ -268,15 +272,92 @@ class _AuditTrailScreenState extends ConsumerState<AuditTrailScreen> {
                            log.action.toLowerCase().contains(_searchQuery.toLowerCase()) ||
                            (log.entityId?.contains(_searchQuery) ?? false);
       final matchesAction = _selectedAction == null || log.action == _selectedAction;
-      final matchesDate = (_startDate == null || log.timestamp.isAfter(_startDate!)) &&
-                         (_endDate == null || log.timestamp.isBefore(_endDate!.add(const Duration(days: 1))));
+      
+      bool matchesDate = true;
+      if (_startDate != null && _endDate != null) {
+        final start = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+        final end = DateTime(_endDate!.year, _endDate!.month, _endDate!.day, 23, 59, 59);
+        matchesDate = log.timestamp.isAfter(start.subtract(const Duration(seconds: 1))) && 
+                      log.timestamp.isBefore(end.add(const Duration(seconds: 1)));
+      }
       return matchesSearch && matchesAction && matchesDate;
     }).toList()..sort((a, b) => b.timestamp.compareTo(a.timestamp));
   }
 
-  Future<void> _pickDateRange() async {
-    final picked = await showDateRangePicker(context: context, firstDate: DateTime(2023), lastDate: DateTime.now());
-    if (picked != null) setState(() { _startDate = picked.start; _endDate = picked.end; });
+  Future<void> _showDateFilterOptions() async {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.today),
+            title: const Text('Today'),
+            onTap: () {
+              final now = DateTime.now();
+              setState(() {
+                _startDate = now;
+                _endDate = now;
+              });
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('Yesterday'),
+            onTap: () {
+              final yesterday = DateTime.now().subtract(const Duration(days: 1));
+              setState(() {
+                _startDate = yesterday;
+                _endDate = yesterday;
+              });
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.calendar_today),
+            title: const Text('Specific Day'),
+            onTap: () async {
+              Navigator.pop(context);
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _startDate ?? DateTime.now(),
+                firstDate: DateTime(2023),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) {
+                setState(() {
+                  _startDate = picked;
+                  _endDate = picked;
+                });
+              }
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.date_range),
+            title: const Text('Date Range'),
+            onTap: () async {
+              Navigator.pop(context);
+              final picked = await showDateRangePicker(
+                context: context,
+                initialDateRange: (_startDate != null && _endDate != null) 
+                  ? DateTimeRange(start: _startDate!, end: _endDate!) 
+                  : null,
+                firstDate: DateTime(2023),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) {
+                setState(() {
+                  _startDate = picked.start;
+                  _endDate = picked.end;
+                });
+              }
+            },
+          ),
+          const SizedBox(height: AppSpacing.l),
+        ],
+      ),
+    );
   }
 
   Color _getActionColor(String action) {

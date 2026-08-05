@@ -39,8 +39,8 @@ enum AnimalType { cow, bull, pig, sheep, goat, hardChicken, softChicken, turkey,
 extension AnimalTypeX on AnimalType {
   String get displayName {
     switch (this) {
-      case AnimalType.hardChicken: return 'CHICKEN (LAYERS)';
-      case AnimalType.softChicken: return 'CHICKEN (BROILERS)';
+      case AnimalType.hardChicken: return 'HARD CHICKEN (LAYER)';
+      case AnimalType.softChicken: return 'SOFT CHICKEN (BROILER)';
       default: return name.toUpperCase();
     }
   }
@@ -184,6 +184,10 @@ class SlaughterLog {
   final double? farmPrice; // Optional cost price from the farm
   final DateTime? slaughterTime;
   final SlaughterStatus status;
+  final String? chickenRangeLabel; // Added for whole chicken stock mapping
+  final String? sourceFarm; // Added for editing support
+  final String? slaughteredBy;
+  final String? portionedBy;
 
   SlaughterLog({
     required this.id,
@@ -199,6 +203,10 @@ class SlaughterLog {
     this.farmPrice,
     this.slaughterTime,
     required this.status,
+    this.chickenRangeLabel,
+    this.sourceFarm,
+    this.slaughteredBy,
+    this.portionedBy,
   });
 
   double get weightLoss => liveWeight - meatWeight;
@@ -225,6 +233,10 @@ class SlaughterLog {
     double? farmPrice,
     DateTime? slaughterTime,
     SlaughterStatus? status,
+    String? chickenRangeLabel,
+    String? sourceFarm,
+    String? slaughteredBy,
+    String? portionedBy,
   }) {
     return SlaughterLog(
       id: id ?? this.id,
@@ -240,6 +252,10 @@ class SlaughterLog {
       farmPrice: farmPrice ?? this.farmPrice,
       slaughterTime: slaughterTime ?? this.slaughterTime,
       status: status ?? this.status,
+      chickenRangeLabel: chickenRangeLabel ?? this.chickenRangeLabel,
+      sourceFarm: sourceFarm ?? this.sourceFarm,
+      slaughteredBy: slaughteredBy ?? this.slaughteredBy,
+      portionedBy: portionedBy ?? this.portionedBy,
     );
   }
 
@@ -259,6 +275,10 @@ class SlaughterLog {
       farmPrice: (map['farm_price'] as num?)?.toDouble(),
       slaughterTime: map['slaughter_time'] != null ? DateTime.parse(map['slaughter_time'] as String) : null,
       status: SlaughterStatus.values.firstWhere((e) => e.name == map['status']),
+      chickenRangeLabel: map['chicken_range_label'] as String?,
+      sourceFarm: map['source_farm'] as String?,
+      slaughteredBy: map['slaughtered_by'] as String?,
+      portionedBy: map['portioned_by'] as String?,
     );
   }
 
@@ -276,6 +296,10 @@ class SlaughterLog {
     'farm_price': farmPrice,
     'slaughter_time': slaughterTime?.toIso8601String(),
     'status': status.name,
+    'chicken_range_label': chickenRangeLabel,
+    'source_farm': sourceFarm,
+    'slaughtered_by': slaughteredBy,
+    'portioned_by': portionedBy,
   };
 }
 
@@ -301,6 +325,7 @@ class MeatBatch {
   final BatchSource source;
   final String? inspectedBy;
   final String? receivedBy;
+  final String? portionedBy;
 
   MeatBatch({
     required this.id,
@@ -314,6 +339,7 @@ class MeatBatch {
     required this.source,
     this.inspectedBy,
     this.receivedBy,
+    this.portionedBy,
   });
 
   MeatBatch copyWith({
@@ -328,6 +354,7 @@ class MeatBatch {
     BatchSource? source,
     String? inspectedBy,
     String? receivedBy,
+    String? portionedBy,
   }) {
     return MeatBatch(
       id: id ?? this.id,
@@ -341,6 +368,7 @@ class MeatBatch {
       source: source ?? this.source,
       inspectedBy: inspectedBy ?? this.inspectedBy,
       receivedBy: receivedBy ?? this.receivedBy,
+      portionedBy: portionedBy ?? this.portionedBy,
     );
   }
 
@@ -362,6 +390,7 @@ class MeatBatch {
       ),
       inspectedBy: map['inspected_by'] as String?,
       receivedBy: map['received_by'] as String?,
+      portionedBy: map['portioned_by'] as String?,
     );
   }
 
@@ -379,6 +408,7 @@ class MeatBatch {
     'owner_name': source.owner,
     'inspected_by': inspectedBy,
     'received_by': receivedBy,
+    'portioned_by': portionedBy,
     'created_at': createdAt.toIso8601String(),
   };
 }

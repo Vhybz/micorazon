@@ -18,6 +18,7 @@ import '../../services/transfer_provider.dart';
 import '../../widgets/passcode_guard.dart';
 
 import '../../services/product_seeder.dart';
+import '../../models/butcher_models.dart';
 
 import '../../widgets/role_pop_scope.dart';
 
@@ -48,7 +49,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     // Safety: Reset selected category if it no longer exists after deletions
     if (productsAsync.hasValue) {
       final products = productsAsync.value!;
-      final availableCategories = ['All', ...products.where((p) => !p.isDeleted).map((p) => p.category).toSet()];
+      final availableCategories = ['All', ...products.where((p) => !p.isDeleted).map((p) => _normalizeCategory(p)).toSet()];
       if (!availableCategories.contains(_selectedCategory)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) setState(() => _selectedCategory = 'All');
@@ -101,7 +102,10 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                           data: (products) {
                             final activeProducts = products
                                 .where((p) => !p.isDeleted)
-                                .where((p) => _selectedCategory == 'All' || p.category == _selectedCategory)
+                                .where((p) {
+                                  final normCat = _normalizeCategory(p);
+                                  return _selectedCategory == 'All' || normCat == _selectedCategory;
+                                })
                                 .where((p) => p.name.toLowerCase().contains(_searchQuery.toLowerCase()) || 
                                                p.category.toLowerCase().contains(_searchQuery.toLowerCase()))
                                 .toList();
@@ -153,7 +157,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
   }
 
   Widget _buildFilters(ThemeData theme, List<Product> products) {
-    final categories = ['All', ...products.map((p) => p.category).toSet()];
+    final categories = ['All', ...products.map((p) => _normalizeCategory(p)).toSet()];
     final isMobile = ResponsiveLayout.isMobile(context);
 
     return Wrap(
@@ -275,7 +279,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
               context: context,
               builder: (context) => AlertDialog(
                 title: const Text('Initialize Catalog?'),
-                content: const Text('This will add all default products (Beef, Pork, Chicken, etc.) with 0.0 quantity if they don\'t exist. Continue?'),
+                content: const Text('This will add all default products (Cow, Pork, Hard Chicken (Layer)/Soft Chicken (Broiler), etc.) with 0.0 quantity if they don\'t exist. Continue?'),
                 actions: [
                   TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('CANCEL')),
                   ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('INITIALIZE')),
@@ -623,22 +627,26 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     String? selectedProductName;
     WeightUnit selectedUnit = WeightUnit.kg;
     bool isUnlimited = false;
+    ChickenRange? selectedRange;
 
     final Map<String, List<String>> categoryProductMap = {
-      'Chicken': [
-        'Hard Whole Chicken (Layer)', 'Soft Whole Chicken (Broiler)',
-        'Hard Thigh (Layer)', 'Soft Thigh (Broiler)', 
-        'Hard Breast (Layer)', 'Soft Breast (Broiler)', 
-        'Hard Back (Layer)', 'Soft Back (Broiler)', 
-        'Hard Wings (Layer)', 'Soft Wings (Broiler)', 
-        'Hard Drumsticks (Layer)', 'Soft Drumsticks (Broiler)',
-        'Gizzard',
+      'Hard Chicken (Layer)': [
+        'Hard Whole Chicken (Layer)', 'Hard Thigh (Layer)', 'Hard Breast (Layer)', 
+        'Hard Back (Layer)', 'Hard Wings (Layer)', 'Hard Drumsticks (Layer)', 
+        'Gizzard', 'Other'
+      ],
+      'Soft Chicken (Broiler)': [
+        'Soft Whole Chicken (Broiler)', 'Soft Thigh (Broiler)', 'Soft Breast (Broiler)', 
+        'Soft Back (Broiler)', 'Soft Wings (Broiler)', 'Soft Drumsticks (Broiler)', 
+        'Gizzard', 'Other'
+      ],
+      'Beef': [
+        'Standard Meat', 'Boneless', 'Cow Steak', 
+        'Liver & Lungs', 'Grounded Meat', 'Tail / Padua',
         'Other'
       ],
       'Cow': [
-        'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Cow Steak', 
-        'Liver & Lungs', 'Grounded Meat', 'Feet', 'Head', 'Tail / Padua',
-        'Other'
+        'Offals / Yemadeɛ', 'Feet', 'Head', 'Other'
       ],
       'Goat': ['Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet', 'Other'],
       'Sheep': ['Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Head', 'Feet', 'Other'],
@@ -653,7 +661,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
       'Other': ['Custom Entry']
     };
 
-    final existingCategories = products.map((p) => p.category).toSet();
+    final existingCategories = products.map((p) => _normalizeCategory(p)).toSet();
     final List<String> categories = categoryProductMap.keys.toList();
     for (var cat in existingCategories) {
       if (!categories.contains(cat)) {
@@ -764,6 +772,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                   }).toList(),
                   onChanged: (v) => setState(() {
                     selectedProductName = v;
+                    selectedRange = null; // Reset range when product changes
                     if (v != 'Other' && v != 'Custom Entry') {
                       nameController.text = v!;
                     } else {
@@ -772,6 +781,20 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                   }),
                   validator: (v) => (v == null) ? 'Required' : null,
                 ),
+                if ((selectedCategory == 'Hard Chicken (Layer)' || selectedCategory == 'Soft Chicken (Broiler)') && selectedProductName != 'Gizzard' && selectedProductName != null) ...[
+                  const SizedBox(height: AppSpacing.m),
+                  DropdownButtonFormField<ChickenRange>(
+                    initialValue: selectedRange,
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Weight Range (LB)'),
+                    items: (selectedCategory == 'Hard Chicken (Layer)' ? AnimalType.hardChicken : AnimalType.softChicken)
+                        .chickenRanges
+                        .map((r) => DropdownMenuItem(value: r, child: Text(r.label)))
+                        .toList(),
+                    onChanged: (v) => setState(() => selectedRange = v),
+                    validator: (v) => ((selectedCategory == 'Hard Chicken (Layer)' || selectedCategory == 'Soft Chicken (Broiler)') && selectedProductName != 'Gizzard' && v == null) ? 'Required' : null,
+                  ),
+                ],
                 if (selectedProductName == 'Other' || selectedProductName == 'Custom Entry') ...[
                   const SizedBox(height: AppSpacing.m),
                   _buildFormTextField(
@@ -916,11 +939,18 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                     }
                   }
 
+                  String finalName = nameController.text;
+                  if ((selectedCategory == 'Hard Chicken (Layer)' || selectedCategory == 'Soft Chicken (Broiler)') && selectedRange != null) {
+                    if (!finalName.contains(selectedRange!.label)) {
+                      finalName = '$finalName (${selectedRange!.label})';
+                    }
+                  }
+
                   final String validUuid = UuidUtils.generate();
 
                   final newProduct = Product(
                     id: validUuid,
-                    name: nameController.text,
+                    name: finalName,
                     retailPrice: double.tryParse(retailPriceController.text) ?? 0.0,
                     wholesalePrice: double.tryParse(wholesalePriceController.text) ?? 0.0,
                     costPrice: double.tryParse(costPriceController.text) ?? 0.0,
@@ -959,9 +989,9 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     final theme = Theme.of(context);
     String selectedCategory = product.category;
     bool isUnlimited = product.isUnlimited;
-    final categories = ['Beef', 'Pork', 'Chicken', 'Lamb', 'Goat', 'Other'];
+    final categories = ['Beef', 'Cow', 'Pork', 'Hard Chicken (Layer)', 'Soft Chicken (Broiler)', 'Lamb', 'Goat', 'Other'];
 
-    if (!categories.contains(product.category)) {
+    if (!categories.contains(_normalizeCategory(product))) {
       selectedCategory = 'Other';
       otherCategoryController.text = product.category;
     }
@@ -1311,7 +1341,9 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                           borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Text(
-                                          product.isUnlimited ? 'UNLIMITED' : '${product.stockQuantity}${product.unit}', 
+                                          product.isUnlimited 
+                                            ? 'UNLIMITED' 
+                                            : '${product.stockQuantity.toStringAsFixed(product.unit == 'unit' ? 0 : 1)}${product.unit == 'unit' ? (product.category == 'CHICKEN' ? " birds" : " pcs") : product.unit}', 
                                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: product.isUnlimited ? Colors.blue : (isLowStock ? Colors.red : Colors.green))
                                         ),
                                       ),
@@ -1474,7 +1506,9 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
-                                    product.isUnlimited ? 'UNLIMITED' : '${product.stockQuantity}${product.unit}', 
+                                    product.isUnlimited 
+                                      ? 'UNLIMITED' 
+                                      : '${product.stockQuantity.toStringAsFixed(product.unit == 'unit' ? 0 : 1)}${product.unit == 'unit' ? (product.category == 'CHICKEN' ? " birds" : " pcs") : product.unit}', 
                                     style: TextStyle(fontWeight: FontWeight.bold, color: product.isUnlimited ? Colors.blue : (isLowStock ? Colors.red : Colors.green))
                                   ),
                                   if (hasIncoming)
@@ -1806,17 +1840,26 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
 
   void _showChickenPortioningDialog(BuildContext context, WidgetRef ref, Product wholeChicken) {
     final qtyController = TextEditingController(text: '1');
-    final gizzardController = TextEditingController(text: '0');
+    
+    // Weight controllers for all parts
+    final thighWeightController = TextEditingController(text: '0');
+    final wingWeightController = TextEditingController(text: '0');
+    final drumWeightController = TextEditingController(text: '0');
+    final breastWeightController = TextEditingController(text: '0');
+    final backWeightController = TextEditingController(text: '0');
+    final gizzardWeightController = TextEditingController(text: '0');
+
     final type = wholeChicken.name.contains('Soft') ? 'Soft' : 'Hard';
-    final typeSuffix = type == 'Soft' ? 'Broiler' : 'Layer';
     bool isProcessing = false;
-    WeightUnit selectedGizzardUnit = WeightUnit.kg;
+    WeightUnit selectedUnit = WeightUnit.kg;
+    bool isLegSeparated = false;
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
+          scrollable: true,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
           title: Row(
             children: [
@@ -1829,83 +1872,94 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('This will reduce the count of whole birds and increase stock for parts.', 
+              const Text('Enter the total weight for each part group resulting from this batch.', 
                 style: TextStyle(fontSize: 12, color: Colors.grey)),
-              const SizedBox(height: 24),
-              TextField(
-                controller: qtyController,
-                decoration: const InputDecoration(
-                  labelText: 'Number of Birds to Portion',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.numbers),
-                ),
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              ),
               const SizedBox(height: 16),
+              
               Row(
                 children: [
                   Expanded(
                     child: TextField(
-                      controller: gizzardController,
-                      decoration: InputDecoration(
-                        labelText: 'Gizzard Weight (${selectedGizzardUnit.name})',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(Icons.scale),
+                      controller: qtyController,
+                      decoration: const InputDecoration(
+                        labelText: 'Number of Birds',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.numbers),
+                        isDense: true,
                       ),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
                   Column(
                     children: [
-                      const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                      const Text('INPUT UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
                       ToggleButtons(
-                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                        constraints: const BoxConstraints(minWidth: 40, minHeight: 32),
                         isSelected: [
-                          selectedGizzardUnit == WeightUnit.kg, 
-                          selectedGizzardUnit == WeightUnit.g,
-                          selectedGizzardUnit == WeightUnit.lb,
+                          selectedUnit == WeightUnit.kg, 
+                          selectedUnit == WeightUnit.lb,
                         ],
                         onPressed: (index) {
                           setState(() {
-                            if (index == 0) selectedGizzardUnit = WeightUnit.kg;
-                            if (index == 1) selectedGizzardUnit = WeightUnit.g;
-                            if (index == 2) selectedGizzardUnit = WeightUnit.lb;
+                            selectedUnit = index == 0 ? WeightUnit.kg : WeightUnit.lb;
                           });
                         },
                         borderRadius: BorderRadius.circular(8),
                         selectedColor: Colors.white,
                         fillColor: Colors.orange,
                         children: const [
-                          Text('kg', style: TextStyle(fontSize: 9)),
-                          Text('g', style: TextStyle(fontSize: 9)),
-                          Text('lb', style: TextStyle(fontSize: 9)),
+                          Text('kg', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                          Text('lb', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ],
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
-                ),
-                child: Column(
-                  children: [
-                    _portionRatioRow('Thighs', '2'),
-                    _portionRatioRow('Wings', '2'),
-                    _portionRatioRow('Drumsticks', '2'),
-                    _portionRatioRow('Breast', '1'),
-                    _portionRatioRow('Back', '1'),
-                  ],
-                ),
+              
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Divider(),
               ),
+              
+              const Text('PART WEIGHTS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange, letterSpacing: 1)),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                title: const Text('Separate Thighs & Drumsticks?', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                subtitle: const Text('OFF: Thigh includes Drumstick. ON: They are separate.', style: TextStyle(fontSize: 9)),
+                value: isLegSeparated, 
+                onChanged: (v) => setState(() => isLegSeparated = v),
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                activeThumbColor: Colors.orange,
+              ),
+              const SizedBox(height: 8),
+              
+              _weightInputField(
+                isLegSeparated ? 'Thighs (Separated)' : ((double.tryParse(drumWeightController.text) ?? 0) > 0 ? 'Thighs (Separated)' : 'Thighs (Whole Leg)'), 
+                thighWeightController, 
+                selectedUnit,
+                enabled: isLegSeparated || (double.tryParse(drumWeightController.text) ?? 0) == 0,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 8),
+              _weightInputField('Wings Weight', wingWeightController, selectedUnit),
+              const SizedBox(height: 8),
+              _weightInputField(
+                isLegSeparated ? 'Drumsticks (Separated)' : ((double.tryParse(thighWeightController.text) ?? 0) > 0 ? 'Drumsticks (Included in Thigh)' : 'Drumsticks Weight'), 
+                drumWeightController, 
+                selectedUnit,
+                enabled: isLegSeparated || (double.tryParse(thighWeightController.text) ?? 0) == 0,
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 8),
+              _weightInputField('Breast Weight', breastWeightController, selectedUnit),
+              const SizedBox(height: 8),
+              _weightInputField('Back Weight', backWeightController, selectedUnit),
+              const SizedBox(height: 8),
+              _weightInputField('Gizzard Weight', gizzardWeightController, selectedUnit),
             ],
           ),
           actions: [
@@ -1913,19 +1967,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             ElevatedButton(
               onPressed: isProcessing ? null : () async {
                 final int birds = int.tryParse(qtyController.text) ?? 0;
-                double gizzardWeight = double.tryParse(gizzardController.text) ?? 0.0;
-                
                 if (birds <= 0) return;
+                
                 if (birds > wholeChicken.stockQuantity) {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not enough whole chickens in stock!')));
                   return;
-                }
-
-                // Handle unit conversion to KG
-                if (selectedGizzardUnit == WeightUnit.g) {
-                  gizzardWeight = WeightConverter.fromG(gizzardWeight);
-                } else if (selectedGizzardUnit == WeightUnit.lb) {
-                  gizzardWeight = WeightConverter.toKg(gizzardWeight);
                 }
 
                 setState(() => isProcessing = true);
@@ -1939,43 +1985,54 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                     rangeSuffix = wholeChicken.name.substring(wholeChicken.name.lastIndexOf('('));
                   }
 
+                  if (rangeSuffix.isEmpty) {
+                    throw Exception('Weight range suffix missing. Cannot portion bird without range.');
+                  }
+
                   // 1. Update Whole Chicken
                   await notifier.updateStock(wholeChicken.id, -birds.toDouble(), reason: 'PORTIONING_REDUCTION');
 
-                  // 2. Update Parts with real-world anatomy ratios
-                  final partsToUpdate = {
-                    'Thigh': birds * 2.0,
-                    'Wings': birds * 2.0,
-                    'Drumsticks': birds * 2.0,
-                    'Breast': birds * 1.0,
-                    'Back': birds * 1.0,
-                  };
+                  // Helper to convert and update
+                  Future<void> updatePart(String partName, String enteredWeight) async {
+                    double weight = double.tryParse(enteredWeight) ?? 0.0;
+                    if (weight <= 0) return;
 
-                  for (var entry in partsToUpdate.entries) {
+                    // Convert to KG for database consistency if needed
+                    if (selectedUnit == WeightUnit.lb) {
+                      weight = WeightConverter.toKg(weight);
+                    }
+
                     // Find the specific card that matches type (Soft/Hard), Part Name, and Range
                     final part = products.where((p) => 
-                      p.name.contains(type) && // Soft or Hard
-                      p.name.contains(entry.key) && // Thigh, Wings, etc.
-                      (rangeSuffix.isEmpty || p.name.contains(rangeSuffix)) // Same weight range
+                      p.name.contains(type) && 
+                      p.name.contains(partName) && 
+                      p.name.contains(rangeSuffix)
                     ).firstOrNull;
 
                     if (part != null) {
-                      await notifier.updateStock(part.id, entry.value, reason: 'PORTIONING_ADDITION');
-                    } else {
-                       debugPrint('WARNING: Could not find matching part card for ${entry.key} in range $rangeSuffix');
+                      await notifier.updateStock(part.id, weight, reason: 'PORTIONING_ADDITION_${rangeSuffix.replaceAll('(', '').replaceAll(')', '').replaceAll(' ', '')}');
                     }
                   }
 
+                  // 2. Update all parts
+                  await updatePart('Thigh', thighWeightController.text);
+                  await updatePart('Wings', wingWeightController.text);
+                  await updatePart('Drumsticks', drumWeightController.text);
+                  await updatePart('Breast', breastWeightController.text);
+                  await updatePart('Back', backWeightController.text);
+
                   // 3. Update Gizzard (Single global card)
-                  final gizzard = products.firstWhere((p) => p.name.toUpperCase() == 'GIZZARD');
+                  double gizzardWeight = double.tryParse(gizzardWeightController.text) ?? 0.0;
                   if (gizzardWeight > 0) {
-                    await notifier.updateStock(gizzard.id, gizzardWeight, reason: 'PORTIONING_GIZZARD');
+                    if (selectedUnit == WeightUnit.lb) gizzardWeight = WeightConverter.toKg(gizzardWeight);
+                    final gizzard = products.firstWhere((p) => p.name.toUpperCase() == 'GIZZARD');
+                    await notifier.updateStock(gizzard.id, gizzardWeight, reason: 'PORTIONING_GIZZARD_WEIGHT');
                   }
 
                   if (context.mounted) {
                     Navigator.pop(context);
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Portioned $birds $type chickens successfully!'), backgroundColor: Colors.green)
+                      SnackBar(content: Text('Portioned $birds chickens and updated part weights!'), backgroundColor: Colors.green)
                     );
                   }
                 } catch (e) {
@@ -1988,7 +2045,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
               style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
               child: isProcessing 
                 ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Text('Confirm Portioning'),
+                : const Text('Save Weights'),
             ),
           ],
         ),
@@ -1996,16 +2053,42 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     );
   }
 
-  Widget _portionRatioRow(String part, String ratio) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(part, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
-          Text('+$ratio per bird', style: const TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.bold)),
-        ],
+  Widget _weightInputField(String label, TextEditingController controller, WeightUnit unit, {bool enabled = true, Function(String)? onChanged}) {
+    return TextFormField(
+      controller: controller,
+      enabled: enabled,
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        labelText: label,
+        suffixText: unit.name,
+        border: const OutlineInputBorder(),
+        isDense: true,
+        fillColor: enabled ? null : Colors.grey.shade100,
+        filled: !enabled,
       ),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
     );
+  }
+
+  String _normalizeCategory(Product p) {
+    final cat = p.category.toUpperCase();
+    if (cat.contains('BEEF') || cat.contains('COW')) {
+      final n = p.name.toUpperCase();
+      if (n.contains('HEAD') || n.contains('FEET') || n.contains('OFFAL')) {
+        return 'Cow';
+      }
+      return 'Beef';
+    }
+    if (cat.contains('HARD LAYER') || cat.contains('HARD CHICKEN')) return 'Hard Chicken (Layer)';
+    if (cat.contains('SOFT BROILER') || cat.contains('SOFT CHICKEN')) return 'Soft Chicken (Broiler)';
+    if (cat.contains('CHICKEN')) {
+      if (p.name.contains('Hard')) return 'Hard Chicken (Layer)';
+      if (p.name.contains('Soft')) return 'Soft Chicken (Broiler)';
+      return 'Hard Chicken (Layer)'; // Default
+    }
+    // Title case fallback
+    if (cat.isEmpty) return 'Other';
+    return cat[0].toUpperCase() + cat.substring(1).toLowerCase();
   }
 }

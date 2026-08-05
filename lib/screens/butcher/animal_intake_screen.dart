@@ -43,6 +43,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
   double _yieldPercent = 0;
   DateTime _intakeDate = DateTime.now();
 
+  SlaughterLog? _editingLog;
 
   @override
   void initState() {
@@ -53,6 +54,38 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
     _liveWeightController.addListener(_calculateMetrics);
     _meatWeightController.addListener(_calculateMetrics);
     _quantityController.addListener(_updateChickenEstimates);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initEditMode();
+    });
+  }
+
+  void _initEditMode() {
+    final log = ref.read(editingSlaughterLogProvider);
+    if (log != null) {
+      setState(() {
+        _editingLog = log;
+        _selectedType = log.type;
+        _isChicken = log.type == AnimalType.softChicken || log.type == AnimalType.hardChicken;
+        if (_isChicken) {
+          _isHard = log.type == AnimalType.hardChicken;
+          _selectedRange = log.type.chickenRanges.firstWhere(
+            (r) => r.label == log.chickenRangeLabel,
+            orElse: () => log.type.chickenRanges.first,
+          );
+        }
+        _tagNumberController.text = log.tagNumber ?? '';
+        _manualFarmTagController.text = log.manualFarmTag ?? '';
+        _liveWeightController.text = log.liveWeight.toString();
+        _meatWeightController.text = log.meatWeight.toString();
+        _priceController.text = log.price.toString();
+        _farmPriceController.text = log.farmPrice?.toString() ?? '';
+        _quantityController.text = log.quantity.toString();
+        _sourceNameController.text = log.sourceFarm ?? '';
+        _intakeDate = log.slaughterTime ?? DateTime.now();
+      });
+      _calculateMetrics();
+    }
   }
 
   void _calculateMetrics() {
@@ -379,8 +412,24 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Live Animal Intake', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-          const Text('Record animal details and supply source for traceability.', style: TextStyle(color: AppColors.textLight)),
+          Row(
+            children: [
+              if (_editingLog != null)
+                IconButton(
+                  onPressed: () {
+                    ref.read(editingSlaughterLogProvider.notifier).state = null;
+                    ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.slaughterLog);
+                  },
+                  icon: const Icon(Icons.arrow_back),
+                ),
+              Text(_editingLog != null ? 'Edit Intake Record' : 'Live Animal Intake', 
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          Text(_editingLog != null 
+            ? 'Modify the details for Tag #${_editingLog!.tagNumber}' 
+            : 'Record animal details and supply source for traceability.', 
+            style: const TextStyle(color: AppColors.textLight)),
           const SizedBox(height: AppSpacing.xl),
           
           Form(
@@ -540,8 +589,8 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
                 onPressed: _isSubmitting ? null : _submitIntake,
                 icon: _isSubmitting 
                   ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.save_rounded),
-                label: Text(_isSubmitting ? 'Processing...' : 'Confirm Intake & Queue for Slaughter',
+                  : Icon(_editingLog != null ? Icons.edit : Icons.save_rounded),
+                label: Text(_isSubmitting ? 'Processing...' : (_editingLog != null ? 'Update Intake Record' : 'Confirm Intake & Queue for Slaughter'),
                   style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.primaryMaroon, foregroundColor: Colors.white),
               ),
@@ -600,6 +649,13 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
         return;
       }
 
+      if (_isChicken && _selectedRange == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please select a weight range for chicken.')),
+        );
+        return;
+      }
+
       setState(() => _isSubmitting = true);
 
       try {
@@ -619,7 +675,37 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
         final price = double.tryParse(_priceController.text) ?? 0;
 
         final farmPrice = double.tryParse(_farmPriceController.text);
-        final branchCode = user!.branchCode!;
+        final branchCode = user?.branchCode;
+        if (branchCode == null) return;
+        final bool isChickenType = type == AnimalType.hardChicken || type == AnimalType.softChicken;
+
+        if (_editingLog != null) {
+          final updatedLog = _editingLog!.copyWith(
+            tagNumber: tagNumber,
+            manualFarmTag: manualFarmTag,
+            type: type,
+            quantity: quantity,
+            liveWeight: liveWeight,
+            meatWeight: meatWeight,
+            price: price,
+            farmPrice: farmPrice,
+            chickenRangeLabel: isChickenType ? _selectedRange?.label : null,
+          );
+
+          await ref.read(slaughterLogsProvider.notifier).updateIntake(
+            log: updatedLog,
+            sourceFarm: _sourceNameController.text,
+          );
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Intake record updated successfully!'), backgroundColor: Colors.green),
+            );
+            ref.read(editingSlaughterLogProvider.notifier).state = null;
+            ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.slaughterLog);
+          }
+          return;
+        }
 
         // Generate proper database UUIDs and human-readable tag numbers
         final String logUuid = UuidUtils.generate();
@@ -639,6 +725,7 @@ class _AnimalIntakeScreenState extends ConsumerState<AnimalIntakeScreen> {
           status: SlaughterStatus.pending, 
           slaughterTime: null,
           branchCode: branchCode,
+          chickenRangeLabel: isChickenType ? _selectedRange?.label : null,
         );
 
         // 0. Record the animal first (Queued for safety)

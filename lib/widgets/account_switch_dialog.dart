@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mi_corazon/models/user_model.dart';
 import 'package:mi_corazon/services/user_provider.dart';
 import 'package:mi_corazon/core/constants.dart';
-import 'package:mi_corazon/widgets/passcode_guard.dart';
 import 'package:mi_corazon/services/auth_provider.dart';
 
 class AccountSwitchDialog extends ConsumerStatefulWidget {
@@ -114,12 +113,14 @@ class _AccountSwitchDialogState extends ConsumerState<AccountSwitchDialog> {
                   // Verify password by attempting to sign in
                   final response = await ref.read(authServiceProvider).signIn(widget.targetUser.email, controller.text);
                   if (response.user != null) {
-                    Navigator.pop(context, true);
+                    if (context.mounted) Navigator.pop(context, true);
                   }
                 } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Invalid password: ${e.toString()}'), backgroundColor: Colors.red),
-                  );
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Invalid password: ${e.toString()}'), backgroundColor: Colors.red),
+                    );
+                  }
                 } finally {
                   setDialogState(() => _isVerifyingPassword = false);
                 }

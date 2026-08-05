@@ -8,11 +8,13 @@ class PaymentDetail {
   final PaymentMethod method;
   final double amount;
   final String? reference; // For mobile/card refs
+  final bool isPaystack;
 
   PaymentDetail({
     required this.method,
     required this.amount,
     this.reference,
+    this.isPaystack = false,
   });
 
   factory PaymentDetail.fromJson(dynamic json) {
@@ -21,6 +23,7 @@ class PaymentDetail {
       method: PaymentMethod.values.byName(map['method']),
       amount: (map['amount'] as num).toDouble(),
       reference: map['reference'],
+      isPaystack: map['is_paystack'] ?? false,
     );
   }
 
@@ -28,6 +31,7 @@ class PaymentDetail {
     'method': method.name,
     'amount': amount,
     'reference': reference,
+    'is_paystack': isPaystack,
   };
 }
 

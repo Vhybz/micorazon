@@ -119,6 +119,30 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     }
   }
 
+  Future<void> updateExpense(ExpenseRecord expense) async {
+    final user = ref.read(currentUserProvider);
+    final expenseWithBranch = expense.copyWith(branchCode: user?.branchCode);
+
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!connectivity.contains(ConnectivityResult.none)) {
+        await _service.updateExpense(expenseWithBranch);
+      } else {
+        throw Exception('Offline');
+      }
+    } catch (e) {
+      // Fallback to Hive Queue
+      await OfflineSyncService.addToQueue(
+        actionType: 'EXPENSE',
+        data: expenseWithBranch.toJson(),
+      );
+      // Optimistic local update
+      state = state.copyWith(
+        records: state.records.map((e) => e.id == expenseWithBranch.id ? expenseWithBranch : e).toList(),
+      );
+    }
+  }
+
   Future<String?> uploadReceipt(Uint8List bytes, String fileName) async {
     return await _service.uploadReceipt(bytes, fileName);
   }

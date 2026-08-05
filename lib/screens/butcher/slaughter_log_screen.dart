@@ -6,6 +6,8 @@ import '../../services/butcher_navigation_provider.dart';
 import '../../services/label_service.dart';
 import '../../widgets/status_chip.dart';
 import '../../models/butcher_models.dart';
+import '../../services/user_provider.dart';
+import '../../models/user_model.dart';
 
 class SlaughterLogScreen extends ConsumerStatefulWidget {
   const SlaughterLogScreen({super.key});
@@ -80,24 +82,52 @@ class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
                         rows: filteredLogs.map((SlaughterLog log) => DataRow(cells: [
                           DataCell(SizedBox(width: 80, child: Text(log.id.substring(0,8), style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))),
                           DataCell(SizedBox(width: 100, child: Text(log.tagNumber ?? 'UUID: ${log.animalId.substring(0,8)}', style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis))),
-                          DataCell(Text(log.type.displayName, style: const TextStyle(fontSize: 11))),
+                          DataCell(Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(log.type.displayName, style: const TextStyle(fontSize: 11)),
+                              if (log.chickenRangeLabel != null)
+                                Text(log.chickenRangeLabel!, 
+                                  style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.blueGrey))
+                              else if (log.type == AnimalType.hardChicken || log.type == AnimalType.softChicken)
+                                const Text('NO RANGE - EDIT REQ', 
+                                  style: TextStyle(fontSize: 8, color: Colors.red, fontWeight: FontWeight.bold)),
+                            ],
+                          )),
                           DataCell(Text(log.quantity > 1 ? '${log.quantity}' : '1', style: const TextStyle(fontSize: 10))),
                           DataCell(Text('${log.liveWeight.toStringAsFixed(1)} kg', style: const TextStyle(fontSize: 10))),
                           DataCell(Text('${log.meatWeight.toStringAsFixed(1)} kg', style: const TextStyle(fontSize: 10))),
                           DataCell(Text('${log.yieldPercentage.toStringAsFixed(1)}%',
                             style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.accentGreen))),
-                          DataCell(StatusChip(
-                            label: log.status.name.toUpperCase(),
-                            color: log.status == SlaughterStatus.completed 
-                                ? Colors.green 
-                                : (log.status == SlaughterStatus.slaughtering 
-                                    ? Colors.red 
-                                    : (log.status == SlaughterStatus.cleaned ? Colors.blue : Colors.orange)),
+                          DataCell(Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              StatusChip(
+                                label: log.status.name.toUpperCase(),
+                                color: log.status == SlaughterStatus.completed 
+                                    ? Colors.green 
+                                    : (log.status == SlaughterStatus.slaughtering 
+                                        ? Colors.red 
+                                        : (log.status == SlaughterStatus.cleaned ? Colors.blue : Colors.orange)),
+                              ),
+                              if (log.slaughteredBy != null || log.portionedBy != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2.0),
+                                  child: Text(
+                                    log.portionedBy != null ? 'Portioned by: ${log.portionedBy}' : 'Butcher: ${log.slaughteredBy}',
+                                    style: const TextStyle(fontSize: 8, fontStyle: FontStyle.italic, color: Colors.grey),
+                                  ),
+                                ),
+                            ],
                           )),
                           DataCell(Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               _buildActions(log),
+                              const SizedBox(width: 8),
+                              _buildIntakeMenu(context, ref, log),
                               if (log.status == SlaughterStatus.completed)
                                 Padding(
                                   padding: const EdgeInsets.only(left: 8.0),
@@ -131,15 +161,102 @@ class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
     );
   }
 
+  Widget _buildIntakeMenu(BuildContext context, WidgetRef ref, SlaughterLog log) {
+    final user = ref.watch(currentUserProvider);
+    if (user == null) return const SizedBox.shrink();
+    
+    final activeRole = user.activePrimaryRole;
+    final canManage = activeRole == UserRole.admin || activeRole == UserRole.superAdmin || activeRole == UserRole.butcher;
+    
+    // Only allow edit/delete if not processed
+    if (!canManage || log.status == SlaughterStatus.processed) return const SizedBox.shrink();
+
+    return PopupMenuButton<String>(
+      onSelected: (val) {
+        if (val == 'edit') {
+          ref.read(editingSlaughterLogProvider.notifier).state = log;
+          ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.animalIntake);
+        } else if (val == 'delete') {
+          _confirmDeleteIntake(context, ref, log);
+        }
+      },
+      icon: const Icon(Icons.more_vert, size: 20),
+      itemBuilder: (context) => [
+        const PopupMenuItem(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(Icons.edit, size: 18, color: Colors.blue),
+              SizedBox(width: 8),
+              Text('Edit Intake'),
+            ],
+          ),
+        ),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, size: 18, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Delete Record', style: TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _confirmDeleteIntake(BuildContext context, WidgetRef ref, SlaughterLog log) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Intake Record?'),
+        content: Text('Are you sure you want to delete the intake record for Tag #${log.tagNumber}? This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await ref.read(slaughterLogsProvider.notifier).deleteIntake(log);
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Record deleted successfully'), backgroundColor: Colors.red),
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                  );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('DELETE'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActions(SlaughterLog log) {
     if (log.status == SlaughterStatus.processed) {
-      return const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.verified, color: Colors.blue, size: 18),
-          SizedBox(width: 4),
-          Text('PROCESSED', style: TextStyle(color: Colors.blue, fontSize: 10, fontWeight: FontWeight.bold)),
-        ],
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.blue.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(AppRadius.m),
+          border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified_user_rounded, color: Colors.blue, size: 14),
+            SizedBox(width: 8),
+            Text('PROCESSED', style: TextStyle(color: Colors.blue, fontSize: 10, fontWeight: FontWeight.w900)),
+          ],
+        ),
       );
     }
 

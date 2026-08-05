@@ -5,6 +5,9 @@ import '../models/butcher_models.dart';
 import 'supabase_butcher_service.dart';
 import 'user_provider.dart';
 import 'audit_service.dart';
+import 'product_service.dart';
+import '../models/product.dart';
+import '../core/supabase_config.dart';
 
 class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>> {
   final SupabaseButcherService _service;
@@ -72,10 +75,28 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
 
   Future<void> updateStatus(String id, SlaughterStatus status) async {
     try {
+      final user = ref.read(currentUserProvider);
       final time = (status == SlaughterStatus.slaughtering || status == SlaughterStatus.completed) 
           ? DateTime.now() 
           : null;
-      await _service.updateSlaughterStatus(id, status, time: time);
+      
+      String? slaughteredBy;
+      if (status == SlaughterStatus.completed) {
+        slaughteredBy = user?.name;
+      }
+
+      await _service.updateSlaughterStatus(id, status, time: time, slaughteredBy: slaughteredBy);
+
+      await AuditService.log(
+        ref: ref,
+        action: 'SLAUGHTER_STATUS_UPDATED',
+        entityType: 'SLAUGHTER_LOG',
+        entityId: id,
+        newData: {
+          'new_status': status.name,
+          'butcher': slaughteredBy,
+        },
+      );
     } catch (e) {
       debugPrint('Error updating status: $e');
     }
@@ -101,7 +122,119 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
     required String sourceFarm,
     required String branchCode,
   }) async {
-    await _service.addAnimal(branchCode, animalUuid, tagNumber, type, weight, sourceFarm, quantity: quantity);
+    await _service.addAnimal(
+      branchCode, 
+      animalUuid, 
+      tagNumber, 
+      type, 
+      weight, 
+      sourceFarm, 
+      quantity: quantity,
+      price: price,
+      manualFarmTag: manualFarmTag,
+    );
+  }
+
+  Future<void> updateIntake({
+    required SlaughterLog log,
+    required String sourceFarm,
+  }) async {
+    try {
+      await _service.updateSlaughterLog(log);
+      await _service.updateAnimal(
+        log.animalId,
+        tagNumber: log.tagNumber,
+        manualFarmTag: log.manualFarmTag,
+        type: log.type,
+        quantity: log.quantity,
+        weight: log.liveWeight,
+        price: log.price,
+        sourceFarm: sourceFarm,
+      );
+      
+      await AuditService.log(
+        ref: ref,
+        action: 'INTAKE_UPDATED',
+        entityType: 'SLAUGHTER_LOG',
+        entityId: log.id,
+        newData: log.toJson(),
+      );
+    } catch (e) {
+      debugPrint('Error updating intake: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deleteIntake(SlaughterLog log) async {
+    try {
+      await _service.deleteSlaughterIntake(log.id, log.animalId);
+      
+      await AuditService.log(
+        ref: ref,
+        action: 'INTAKE_DELETED',
+        entityType: 'SLAUGHTER_LOG',
+        entityId: log.id,
+        oldData: log.toJson(),
+      );
+    } catch (e) {
+      debugPrint('Error deleting intake: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> finalizeChickenAsWhole(SlaughterLog log) async {
+    try {
+      final products = ref.read(productsFutureProvider).value ?? [];
+      
+      final type = log.type == AnimalType.softChicken ? 'Soft' : 'Hard';
+      final range = log.chickenRangeLabel ?? '';
+
+      if (range.isEmpty) {
+        throw Exception('Weight range is missing for this chicken batch. Please Edit the intake record to select a range before finalizing.');
+      }
+
+      // Find the specific card that matches type (Soft/Hard), "Whole Chicken", and Range
+      final product = products.where((p) => 
+        p.name.contains(type) && 
+        p.name.contains('Whole Chicken') && 
+        p.name.contains(range)
+      ).firstOrNull;
+
+      if (product != null) {
+        final user = ref.read(currentUserProvider);
+        // ATOMIC Update: Use database function
+        await SupabaseConfig.client.rpc('increment_stock', params: {
+          'p_id': product.id,
+          'p_amount': log.quantity.toDouble(),
+        });
+        
+        // Mark log as processed
+        final updatedLog = log.copyWith(
+          status: SlaughterStatus.processed,
+          slaughterTime: DateTime.now(),
+          portionedBy: user?.name,
+        );
+        await updateSlaughterRecord(updatedLog);
+
+        await AuditService.log(
+          ref: ref,
+          action: 'CHICKEN_FINALIZED_AS_WHOLE',
+          entityType: 'SLAUGHTER_LOG',
+          entityId: log.id,
+          newData: {
+            'added_quantity': log.quantity, 
+            'product_id': product.id, 
+            'range': range,
+            'portioner': user?.name,
+          },
+        );
+      } else {
+        throw Exception('Matching Whole Chicken product not found for range $range');
+      }
+    } catch (e) {
+      debugPrint('Error finalizing whole chicken: $e');
+      rethrow;
+    }
   }
 }
 
@@ -188,7 +321,8 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
     required double waste,
   }) async {
     try {
-      final branchCode = ref.read(currentUserProvider)?.branchCode;
+      final user = ref.read(currentUserProvider);
+      final branchCode = user?.branchCode;
       if (branchCode == null) throw Exception('No branch code assigned');
 
       final batch = MeatBatch(
@@ -205,12 +339,56 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
           location: branchCode,
           owner: 'Mi~Corazon',
         ),
+        portionedBy: user?.name,
       );
 
       await _service.addMeatBatch(batch);
 
+      // Inventory Integration: Update Shop Stock for each cut
+      final products = ref.read(productsFutureProvider).value ?? [];
+      final range = log.chickenRangeLabel ?? '';
+      final isChicken = log.type == AnimalType.softChicken || log.type == AnimalType.hardChicken;
+
       for (final cut in cuts) {
         await ref.read(recentCutsProvider.notifier).addCut(cut);
+
+        // Map cut back to Shop Product
+        Product? targetProduct;
+        if (isChicken) {
+          if (range.isEmpty) {
+            throw Exception('Weight range is missing for this chicken batch. Please Edit the intake record to select a range before portioning.');
+          }
+          final catMatch = log.type == AnimalType.softChicken ? 'SOFT CHICKEN (BROILER)' : 'HARD CHICKEN (LAYER)';
+          targetProduct = products.where((p) => 
+            p.category.toUpperCase().contains(catMatch) && 
+            p.name.contains(cut.name) && 
+            p.name.contains(range)
+          ).firstOrNull;
+        } else {
+          // Standard Meat mapping (Cow/Goat/Pork etc)
+          final bool isCow = log.type == AnimalType.cow || log.type == AnimalType.bull;
+          
+          targetProduct = products.where((p) {
+            final pCat = p.category.toUpperCase();
+            final cutName = cut.name.toUpperCase();
+            
+            if (isCow) {
+              final bool isCowPart = cutName.contains('HEAD') || cutName.contains('FEET') || cutName.contains('OFFAL');
+              final String targetCat = isCowPart ? 'COW' : 'BEEF';
+              // Check for either the target category or legacy 'COW' (since we're transitioning)
+              return (pCat == targetCat || pCat == 'COW' || pCat == 'BEEF') && p.name.contains(cut.name);
+            }
+            
+            return pCat == log.type.name.toUpperCase() && p.name.contains(cut.name);
+          }).firstOrNull;
+        }
+
+        if (targetProduct != null) {
+          await SupabaseConfig.client.rpc('increment_stock', params: {
+            'p_id': targetProduct.id,
+            'p_amount': cut.weight,
+          });
+        }
       }
 
       if (waste > 0) {
@@ -221,9 +399,22 @@ class MeatBatchNotifier extends StateNotifier<AsyncValue<List<MeatBatch>>> {
         status: SlaughterStatus.processed,
         meatWeight: totalCarcassWeight,
         slaughterTime: DateTime.now(),
+        portionedBy: user?.name,
       );
       
       await ref.read(slaughterLogsProvider.notifier).updateSlaughterRecord(updatedLog);
+
+      await AuditService.log(
+        ref: ref,
+        action: 'SLAUGHTER_FINALIZED_PORTIONED',
+        entityType: 'SLAUGHTER_LOG',
+        entityId: log.id,
+        newData: {
+          'cuts_count': cuts.length, 
+          'total_weight': totalCarcassWeight,
+          'portioner': user?.name,
+        },
+      );
     } catch (e) {
       debugPrint('Error initiating batch: $e');
       rethrow;

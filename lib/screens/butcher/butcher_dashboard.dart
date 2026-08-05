@@ -39,8 +39,8 @@ class ButcherDashboard extends ConsumerWidget {
                   margin: const EdgeInsets.only(bottom: AppSpacing.l),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(AppRadius.m),
-                    image: const DecorationImage(
-                      image: AssetImage('assets/images/butcher_beef.jpg'),
+                    image: DecorationImage(
+                      image: const AssetImage('assets/images/butcher_cow.jpg'),
                       fit: BoxFit.cover,
                       alignment: Alignment.center,
                     ),
@@ -482,11 +482,11 @@ class ButcherDashboard extends ConsumerWidget {
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
                   decoration: const InputDecoration(labelText: 'Meat Category'),
-                  items: ['Beef', 'Pork', 'Chicken', 'Goat', 'Sheep', 'Rabbit'].map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
+                  items: ['Beef', 'Cow', 'Pork', 'Hard Chicken (Layer)', 'Soft Chicken (Broiler)', 'Goat', 'Sheep', 'Rabbit'].map((cat) => DropdownMenuItem(value: cat, child: Text(cat))).toList(),
                   onChanged: (v) {
                     setState(() {
                       selectedCategory = v;
-                      if (v == 'Chicken') {
+                      if (v == 'Hard Chicken (Layer)' || v == 'Soft Chicken (Broiler)') {
                         selectedUnit = WeightUnit.unit;
                       } else {
                         selectedUnit = WeightUnit.kg;

@@ -45,6 +45,10 @@ class UserAccount {
   final String? themeMode; // 'light', 'dark', 'system'
   final int? themePrimaryColor;
 
+  // Cumulative Payroll Stats (DB backed)
+  final double totalSalaryPaid;
+  final double totalAdvancesTaken;
+
   UserAccount({
     required this.id,
     required this.firstName,
@@ -75,6 +79,8 @@ class UserAccount {
     this.passcodeSentAt,
     this.themeMode,
     this.themePrimaryColor,
+    this.totalSalaryPaid = 0.0,
+    this.totalAdvancesTaken = 0.0,
   }) : createdAt = createdAt ?? DateTime.now();
 
   factory UserAccount.fromJson(Map<String, dynamic> json) {
@@ -141,6 +147,8 @@ class UserAccount {
       passcodeSentAt: safeDate(json['passcode_sent_at']),
       themeMode: json['theme_mode']?.toString(),
       themePrimaryColor: json['theme_primary_color'] != null ? int.tryParse(json['theme_primary_color'].toString()) : null,
+      totalSalaryPaid: (json['total_salary_paid'] as num? ?? 0.0).toDouble(),
+      totalAdvancesTaken: (json['total_advances_taken'] as num? ?? 0.0).toDouble(),
     );
   }
 
@@ -175,6 +183,8 @@ class UserAccount {
       'passcode_sent_at': passcodeSentAt?.toIso8601String(),
       'theme_mode': themeMode,
       'theme_primary_color': themePrimaryColor,
+      'total_salary_paid': totalSalaryPaid,
+      'total_advances_taken': totalAdvancesTaken,
     };
   }
 
@@ -239,6 +249,8 @@ class UserAccount {
     DateTime? passcodeSentAt,
     String? themeMode,
     int? themePrimaryColor,
+    double? totalSalaryPaid,
+    double? totalAdvancesTaken,
     bool clearPromotion = false,
   }) {
     return UserAccount(
@@ -271,6 +283,8 @@ class UserAccount {
       passcodeSentAt: passcodeSentAt ?? this.passcodeSentAt,
       themeMode: themeMode ?? this.themeMode,
       themePrimaryColor: themePrimaryColor ?? this.themePrimaryColor,
+      totalSalaryPaid: totalSalaryPaid ?? this.totalSalaryPaid,
+      totalAdvancesTaken: totalAdvancesTaken ?? this.totalAdvancesTaken,
     );
   }
 }

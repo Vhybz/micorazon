@@ -17,20 +17,36 @@ class ProductSeeder {
     
     final List<Map<String, List<String>>> data = [
       {
-        'CHICKEN': [
-          'Hard Whole Chicken (Layer)', 'Soft Whole Chicken (Broiler)',
-          'Hard Thigh (Layer)', 'Soft Thigh (Broiler)', 
-          'Hard Breast (Layer)', 'Soft Breast (Broiler)', 
-          'Hard Back (Layer)', 'Soft Back (Broiler)', 
-          'Hard Wings (Layer)', 'Soft Wings (Broiler)', 
-          'Hard Drumsticks (Layer)', 'Soft Drumsticks (Broiler)',
+        'HARD CHICKEN (LAYER)': [
+          'Hard Whole Chicken (Layer)',
+          'Hard Thigh (Layer)',
+          'Hard Breast (Layer)',
+          'Hard Back (Layer)',
+          'Hard Wings (Layer)',
+          'Hard Drumsticks (Layer)',
+          'Gizzard'
+        ]
+      },
+      {
+        'SOFT CHICKEN (BROILER)': [
+          'Soft Whole Chicken (Broiler)',
+          'Soft Thigh (Broiler)',
+          'Soft Breast (Broiler)',
+          'Soft Back (Broiler)',
+          'Soft Wings (Broiler)',
+          'Soft Drumsticks (Broiler)',
           'Gizzard'
         ]
       },
       {
         'COW': [ 
-          'Standard Meat', 'Boneless', 'Offals / Yemadeɛ', 'Cow Steak',
-          'Liver & Lungs', 'Grounded Meat', 'Feet', 'Head', 'Tail / Padua'
+          'Offals / Yemadeɛ', 'Feet', 'Head'
+        ]
+      },
+      {
+        'BEEF': [
+          'Standard Meat', 'Boneless', 'Cow Steak', 'Liver & Lungs', 
+          'Grounded Meat', 'Tail / Padua'
         ]
       },
       {
@@ -70,9 +86,11 @@ class ProductSeeder {
       final productNames = categoryMap.values.first;
 
       for (var name in productNames) {
-        if (category == 'CHICKEN' && name.toUpperCase() != 'GIZZARD') {
+        final bool isChicken = category == 'HARD CHICKEN (LAYER)' || category == 'SOFT CHICKEN (BROILER)';
+        
+        if (isChicken && name.toUpperCase() != 'GIZZARD') {
           // Special handling for chicken parts - Create separate cards for each weight range
-          final bool isHard = name.contains('Hard');
+          final bool isHard = category == 'HARD CHICKEN (LAYER)';
           final type = isHard ? AnimalType.hardChicken : AnimalType.softChicken;
           final ranges = type.chickenRanges;
 
@@ -94,7 +112,7 @@ class ProductSeeder {
               imageUrl: '', 
               category: category,
               stockQuantity: 0.0,
-              unit: 'unit',
+              unit: name.contains('Whole') ? 'unit' : 'kg',
             );
             await service.addProduct(product);
           }

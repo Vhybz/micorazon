@@ -406,3 +406,17 @@ GRANT ALL ON FUNCTION public.increment_stock TO anon, authenticated, service_rol
 
 NOTIFY pgrst, 'reload schema';
 ```
+-- 1. Add range label to slaughter logs for tracking
+ALTER TABLE public.slaughter_logs
+ADD COLUMN IF NOT EXISTS chicken_range_label TEXT;
+
+-- 2. Create Atomic Increment Function for Inventory
+-- This prevents stock errors when multiple users are selling/updating at once
+CREATE OR REPLACE FUNCTION increment_stock(p_id UUID, p_amount NUMERIC)
+RETURNS VOID AS $$
+BEGIN
+UPDATE public.products
+SET stock_quantity = stock_quantity + p_amount
+WHERE id = p_id;
+END;
+$$ LANGUAGE plpgsql;
