@@ -8,7 +8,6 @@ import '../models/product.dart';
 import 'supabase_product_service.dart';
 import 'user_provider.dart';
 import 'notification_service.dart';
-import 'sms_service.dart';
 import 'audit_service.dart';
 import 'offline_sync_service.dart';
 import '../models/system_models.dart';
@@ -123,7 +122,7 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
       if (!product.isDeleted && 
           product.lastStockUpdate != null && // Avoid alerts for brand new/uninitialized items
           product.stockQuantity <= product.lowStockThreshold) {
-        final title = 'LOW STOCK ALERT: ${product.name}';
+        final title = 'INVENTORY NOTICE: ${product.name}';
         final message = '${product.name} is below safety threshold (${product.stockQuantity}${product.unit} remaining).';
         
         // Avoid duplicate notifications (don't check isRead, just existence)
@@ -134,8 +133,8 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         if (!existing) {
           ref.read(notificationProvider.notifier).addNotification(title, message);
           
-          // Optionally notify admin via SMS
-          SmsService.notifyAdmin(title: title, message: message);
+          // SMS notification for admin disabled per user request
+          // SmsService.notifyAdmin(title: title, message: message);
         }
       }
     }

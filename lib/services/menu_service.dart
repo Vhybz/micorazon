@@ -19,8 +19,10 @@ class MenuService {
       SidebarItem(icon: Icons.admin_panel_settings_rounded, label: 'Staff Management', route: '/admin/staff'),
       SidebarItem(icon: Icons.bar_chart_rounded, label: 'Sales Analytics', route: '/admin/sales'),
       SidebarItem(icon: Icons.inventory_2_rounded, label: 'Master Stock Control', route: '/admin/stock'),
+      SidebarItem(icon: Icons.assessment_rounded, label: 'Product Activity Report', route: '/admin/product-report'),
       SidebarItem(icon: Icons.account_balance_wallet_rounded, label: 'Debt Tracker', route: '/admin/debts'),
       SidebarItem(icon: Icons.receipt_long_rounded, label: 'Business Expenses', route: '/admin/expenses'),
+      SidebarItem(icon: Icons.account_balance_wallet_outlined, label: 'Till & Sales Log', route: '/admin/sales'),
       SidebarItem(icon: Icons.people_outline_rounded, label: 'Customer Directory', route: '/admin/customers'),
       SidebarItem(icon: Icons.account_balance_rounded, label: 'GRA Tax Compliance', route: '/admin/tax'),
       SidebarItem(icon: Icons.payments_rounded, label: 'Salary Management', route: '/admin/salaries'),
@@ -56,7 +58,8 @@ class MenuService {
                                   item.route == '/admin/recents' || 
                                   item.route == '/admin/audit' || 
                                   item.route == '/admin/maintenance' ||
-                                  item.route == '/admin/settings';
+                                  item.route == '/admin/settings' ||
+                                  item.route == '/admin/product-report';
         
         final hasSpecificRestrictions = user.enabledPermissions.isNotEmpty && 
                                          user.enabledPermissions.any((p) => p.startsWith('/admin'));
@@ -166,10 +169,12 @@ class MenuService {
       {'route': '/admin', 'label': 'Admin Dashboard'},
       {'route': '/admin/sales', 'label': 'Sales Analytics'},
       {'route': '/admin/expenses', 'label': 'Business Expenses'},
+      {'route': '/admin/till', 'label': 'Till & Sales Log (Redirect)'},
       {'route': '/admin/customers', 'label': 'Customer Directory'},
       {'route': '/admin/documents', 'label': 'Compliance Documents'},
       {'route': '/admin/debts', 'label': 'Debt Tracker'},
       {'route': '/admin/stock', 'label': 'Master Stock Control'},
+      {'route': '/admin/product-report', 'label': 'Product Activity Report'},
       {'route': '/admin/salaries', 'label': 'Salary Management'},
       {'route': '/admin/staff', 'label': 'Staff Management'},
       {'route': '/admin/recents', 'label': 'Company Recents'},

@@ -19,6 +19,11 @@ import '../../widgets/role_pop_scope.dart';
 import '../../services/menu_service.dart';
 import '../../services/user_provider.dart';
 import '../../widgets/phone_prompt_dialog.dart';
+import '../../services/till_provider.dart';
+import '../../models/system_models.dart';
+import '../../core/uuid_utils.dart';
+import '../../models/expense_model.dart';
+import '../../services/report_service.dart';
 
 class SalesReportsScreen extends ConsumerStatefulWidget {
   const SalesReportsScreen({super.key});
@@ -42,13 +47,15 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
   double? _minTotal;
   double? _maxTotal;
 
+  String _salesLogSearchQuery = '';
+
   int? _sortColumnIndex;
   bool _sortAscending = true;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
   }
 
   @override
@@ -131,6 +138,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     tabs: const [
                       Tab(text: 'OVERVIEW', icon: Icon(Icons.analytics_outlined)),
                       Tab(text: 'TRANSACTIONS', icon: Icon(Icons.history_rounded)),
+                      Tab(text: 'SALES LOG', icon: Icon(Icons.account_balance_wallet_outlined)),
                     ],
                   ),
                   Expanded(
@@ -139,6 +147,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                       children: [
                         _buildOverviewTab(context, filteredSales, expenseState.records),
                         _buildTransactionsTab(context, filteredSales),
+                        _buildSalesLogTab(context, ref),
                       ],
                     ),
                   ),
@@ -152,12 +161,15 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
   }
 
   Widget _buildOverviewTab(BuildContext context, List<SaleRecord> sales, List<dynamic> expenses) {
+    final tillState = ref.watch(tillProvider);
+    final totalPending = tillState.pendingByDay.values.fold(0.0, (sum, val) => sum + val);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.l),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildSummaryCards(context, sales, expenses),
+          _buildSummaryCards(context, sales, expenses, totalPending),
           const SizedBox(height: AppSpacing.xl),
           _buildRevenueChart(context, sales),
         ],
@@ -258,7 +270,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     SizedBox(
                       width: constraints.maxWidth < 600 ? constraints.maxWidth : 180,
                       child: DropdownButtonFormField<String>(
-                        initialValue: _cashierFilter,
+                        initialValue: staff.any((u) => u.name == _cashierFilter) ? _cashierFilter : null,
                         isExpanded: true,
                         decoration: const InputDecoration(labelText: 'Sold By', border: OutlineInputBorder(), isDense: true),
                         items: [
@@ -479,7 +491,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     });
   }
 
-  Widget _buildSummaryCards(BuildContext context, List<SaleRecord> sales, List<dynamic> expenses) {
+  Widget _buildSummaryCards(BuildContext context, List<SaleRecord> sales, List<dynamic> expenses, double tillBalance) {
     final totalRevenue = sales.where((s) => s.status != SaleStatus.cancelled).fold(0.0, (sum, sale) => sum + sale.totalAmount);
     final totalExpenses = expenses.fold(0.0, (sum, e) => sum + (e.amount as double));
     final netProfit = totalRevenue - totalExpenses;
@@ -495,6 +507,8 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
             _reportCard(context, 'Total Expenses', '₵ ${totalExpenses.toStringAsFixed(2)}', Icons.trending_down, Colors.red),
             const SizedBox(height: AppSpacing.m),
             _reportCard(context, 'Net Profit', '₵ ${netProfit.toStringAsFixed(2)}', Icons.account_balance_wallet, Colors.green),
+            const SizedBox(height: AppSpacing.m),
+            _reportCard(context, 'Cash at Shop', '₵ ${tillBalance.toStringAsFixed(2)}', Icons.money, Colors.orange),
           ],
         );
       }
@@ -506,6 +520,8 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
           Expanded(child: _reportCard(context, 'Total Expenses', '₵ ${totalExpenses.toStringAsFixed(2)}', Icons.trending_down, Colors.red)),
           const SizedBox(width: AppSpacing.m),
           Expanded(child: _reportCard(context, 'Net Profit', '₵ ${netProfit.toStringAsFixed(2)}', Icons.account_balance_wallet, Colors.green)),
+          const SizedBox(width: AppSpacing.m),
+          Expanded(child: _reportCard(context, 'Cash at Shop', '₵ ${tillBalance.toStringAsFixed(2)}', Icons.money, Colors.orange)),
         ],
       );
     });
@@ -1597,6 +1613,523 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
             ),
           );
         }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildSalesLogTab(BuildContext context, WidgetRef ref) {
+    final tillState = ref.watch(tillProvider);
+    final salesHistory = ref.watch(saleHistoryProvider);
+    final theme = Theme.of(context);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    // Combine all dates that have either pending cash or previous closures
+    final allDates = {
+      ...tillState.pendingByDay.keys,
+      ...tillState.closuresByDay.keys,
+    }.toList()..sort((a, b) => b.compareTo(a));
+
+    final filteredDates = allDates.where((date) {
+      if (_salesLogSearchQuery.isEmpty) return true;
+      final dateStr = DateFormat('EEEE MMMM dd yyyy').format(date).toLowerCase();
+      final search = _salesLogSearchQuery.toLowerCase();
+      return dateStr.contains(search);
+    }).toList();
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.l, vertical: AppSpacing.m),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  onChanged: (v) => setState(() => _salesLogSearchQuery = v),
+                  decoration: InputDecoration(
+                    hintText: 'Search dates...',
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    suffixIcon: _salesLogSearchQuery.isNotEmpty 
+                      ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _salesLogSearchQuery = ''))
+                      : null,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+                    isDense: true,
+                    filled: true,
+                    fillColor: theme.cardTheme.color?.withValues(alpha: 0.5),
+                  ),
+                ),
+              ),
+              if (tillState.pendingByDay.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: () => _handleTakeAllCash(context, ref, tillState.pendingByDay),
+                  icon: const Icon(Icons.done_all_rounded, size: 18),
+                  label: const Text('TAKE ALL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: theme.colorScheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (filteredDates.isEmpty)
+          Expanded(
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _salesLogSearchQuery.isEmpty 
+                      ? Icons.check_circle_outline_rounded 
+                      : Icons.search_off_rounded, 
+                    size: 64, 
+                    color: Colors.grey.withValues(alpha: 0.5)
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    _salesLogSearchQuery.isEmpty ? 'All Sales are Closed' : 'No matches found', 
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)
+                  ),
+                  Text(
+                    _salesLogSearchQuery.isEmpty 
+                      ? 'The shop till is perfectly balanced.' 
+                      : 'Try searching for a different day or month.', 
+                    style: const TextStyle(color: Colors.grey)
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.all(AppSpacing.l),
+              itemCount: filteredDates.length,
+              itemBuilder: (context, index) {
+                final date = filteredDates[index];
+                final pendingAmount = tillState.pendingByDay[date] ?? 0.0;
+                final closures = tillState.closuresByDay[date] ?? [];
+                
+                final isToday = date == today;
+                final isPast = date.isBefore(today);
+                final hasPending = pendingAmount > 0.01;
+
+                // Find most purchased item for this specific day
+                final daySales = salesHistory.where((s) => 
+                  s.timestamp.year == date.year && 
+                  s.timestamp.month == date.month && 
+                  s.timestamp.day == date.day &&
+                  s.status != SaleStatus.cancelled &&
+                  s.status != SaleStatus.reversed
+                ).toList();
+
+                String topItemName = 'N/A';
+                String topItemCategory = '';
+                double topItemQty = 0;
+                double topItemAmount = 0;
+                String unit = '';
+
+                if (daySales.isNotEmpty) {
+                  final Map<String, ({double qty, double amount, String unit, String category})> totals = {};
+                  for (var sale in daySales) {
+                    for (var item in sale.items) {
+                      final existing = totals[item.product.name];
+                      totals[item.product.name] = (
+                        qty: (existing?.qty ?? 0) + item.quantity,
+                        amount: (existing?.amount ?? 0) + item.total,
+                        unit: item.product.unit,
+                        category: item.product.category
+                      );
+                    }
+                  }
+
+                  if (totals.isNotEmpty) {
+                    final topEntry = totals.entries.reduce((a, b) => a.value.qty > b.value.qty ? a : b);
+                    topItemName = topEntry.key;
+                    topItemCategory = topEntry.value.category;
+                    topItemQty = topEntry.value.qty;
+                    topItemAmount = topEntry.value.amount;
+                    unit = topEntry.value.unit;
+                  }
+                }
+
+                return Card(
+                  elevation: hasPending ? 4 : 1,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    side: BorderSide(
+                      color: hasPending 
+                        ? (isPast ? Colors.red.withValues(alpha: 0.5) : Colors.green.withValues(alpha: 0.5))
+                        : theme.dividerColor.withValues(alpha: 0.5),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.m),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: (hasPending ? (isPast ? Colors.red : Colors.green) : Colors.grey).withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Icon(
+                                hasPending 
+                                  ? (isPast ? Icons.warning_amber_rounded : Icons.calendar_today_rounded)
+                                  : Icons.check_circle_rounded,
+                                color: hasPending 
+                                  ? (isPast ? Colors.red : Colors.green.shade700)
+                                  : Colors.grey,
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isToday ? 'TODAY\'S SALES' : DateFormat('EEEE, MMM dd').format(date).toUpperCase(),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.2,
+                                      color: hasPending 
+                                        ? (isPast ? Colors.red : Colors.green.shade700)
+                                        : Colors.grey,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    hasPending ? '₵ ${pendingAmount.toStringAsFixed(2)}' : 'Fully Closed',
+                                    style: TextStyle(
+                                      fontSize: 22, 
+                                      fontWeight: FontWeight.w900,
+                                      color: hasPending ? theme.colorScheme.onSurface : Colors.grey
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (hasPending)
+                              ElevatedButton.icon(
+                                onPressed: () => _handleCloseDailySales(
+                                  context, 
+                                  ref, 
+                                  pendingAmount, 
+                                  targetDate: date,
+                                  initialNote: 'Closure for ${DateFormat('yyyy-MM-dd').format(date)}',
+                                ),
+                                icon: const Icon(Icons.lock_clock, size: 16),
+                                label: const Text('TAKE CASH', style: TextStyle(fontWeight: FontWeight.bold)),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: isPast ? Colors.red.shade700 : Colors.green.shade700,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                              )
+                            else
+                              const Icon(Icons.verified_user_rounded, color: Colors.green, size: 28),
+                          ],
+                        ),
+                        
+                        // Closure History (New)
+                        if (closures.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('CLOSURE HISTORY', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5)),
+                                const SizedBox(height: 4),
+                                ...closures.map((c) {
+                                  // Undo Logic: Only allow if closure was made on the same calendar day
+                                  final bool canUndo = DateUtils.isSameDay(c.timestamp, DateTime.now()) || 
+                                                       (c.userName?.contains('(Undoable)') ?? false); // Metadata check if needed
+
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.history_toggle_off_rounded, size: 10, color: Colors.grey),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            '₵${c.amount.toStringAsFixed(0)} taken by ${c.userName}',
+                                            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w500),
+                                          ),
+                                        ),
+                                        Text(
+                                          DateFormat('HH:mm').format(c.timestamp),
+                                          style: const TextStyle(fontSize: 9, color: Colors.grey),
+                                        ),
+                                        if (canUndo) ...[
+                                          const SizedBox(width: 8),
+                                          InkWell(
+                                            onTap: () => _handleUndoClosure(context, ref, c),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: Colors.red.withValues(alpha: 0.1),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: const Text('UNDO', style: TextStyle(color: Colors.red, fontSize: 8, fontWeight: FontWeight.bold)),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        if (daySales.isNotEmpty) ...[
+                          const Divider(height: 24),
+                          Row(
+                            children: [
+                              const Icon(Icons.trending_up_rounded, size: 14, color: Colors.grey),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (topItemCategory.isNotEmpty)
+                                      Text(topItemCategory.toUpperCase(), style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: theme.colorScheme.primary, letterSpacing: 0.5)),
+                                    Text(
+                                      'Top Seller: $topItemName',
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Text(
+                                '${WeightConverter.formatShort(topItemQty, unit: unit)} • ₵${topItemAmount.toStringAsFixed(2)}',
+                                style: TextStyle(fontSize: 11, color: theme.colorScheme.primary, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        
+        // Minor secondary actions at bottom
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.l),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton.icon(
+                onPressed: () => _confirmResetLedger(context, ref),
+                icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.grey),
+                label: const Text('Reset Ledger', style: TextStyle(color: Colors.grey, fontSize: 11)),
+              ),
+              OutlinedButton.icon(
+                onPressed: () => ReportService.generateTillLedgerReport(tillState.history),
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                label: const Text('Full History Ledger', style: TextStyle(fontSize: 11)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _confirmResetLedger(BuildContext context, WidgetRef ref) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset Sales Ledger?'),
+        content: const Text(
+          'This will PERMANENTLY DELETE all CEO Withdrawals and Till Opening Balances. '
+          'Actual sales data will NOT be affected.\n\n'
+          'Use this to clear dummy information and start fresh.'
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('CANCEL')),
+          ElevatedButton(
+            onPressed: () async {
+              await ref.read(expenseProvider.notifier).purgeCashoutRecords();
+              if (context.mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Sales Ledger has been reset.'))
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('CONFIRM RESET'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleTakeAllCash(BuildContext context, WidgetRef ref, Map<DateTime, double> pendingByDay) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Bulk Sales Closure'),
+        content: Text('Are you sure you want to close sales for all ${pendingByDay.length} pending days? This will clear the shop till completely.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              
+              final notifier = ref.read(expenseProvider.notifier);
+              
+              // Sort to close oldest first
+              final sortedKeys = pendingByDay.keys.toList()..sort((a, b) => a.compareTo(b));
+              double rollingTotalPending = pendingByDay.values.fold(0.0, (sum, val) => sum + val);
+              
+              int count = 0;
+              for (final date in sortedKeys) {
+                final amount = pendingByDay[date]!;
+                if (amount <= 0.01) continue;
+
+                final expense = ExpenseRecord(
+                  id: UuidUtils.generate(),
+                  title: 'Bulk Closure: ${DateFormat('yyyy-MM-dd').format(date)}',
+                  category: 'Daily Sales Closure',
+                  amount: amount,
+                  date: date,
+                );
+                
+                rollingTotalPending -= amount;
+
+                await notifier.recordCEOWithdrawal(
+                  expense: expense,
+                  currentTillBalance: amount, // The balance for this specific day
+                  totalRemainingAfter: rollingTotalPending,
+                );
+                count++;
+              }
+
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Successfully closed $count pending days.'), backgroundColor: Colors.green),
+                );
+              }
+            },
+            child: const Text('YES, TAKE ALL'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleUndoClosure(BuildContext context, WidgetRef ref, TillMovement movement) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Undo Cash Taking?'),
+        content: Text('This will revert the closure of ₵${movement.amount.toStringAsFixed(2)} and return it to the shop till balance.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              await ref.read(expenseProvider.notifier).deleteExpense(movement.id);
+              if (context.mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Closure undone. Cash returned to till.'), backgroundColor: Colors.orange),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            child: const Text('CONFIRM UNDO'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleCloseDailySales(BuildContext context, WidgetRef ref, double currentBalance, {DateTime? targetDate, String? initialNote}) {
+    final amountController = TextEditingController(text: currentBalance.toStringAsFixed(2));
+    final noteController = TextEditingController(text: initialNote);
+    final closureDate = targetDate ?? DateTime.now();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Daily Sales Closure'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Confirming cash taking for ${DateFormat('MMM dd, yyyy').format(closureDate)}.', style: const TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            const Text('Verify total cash to be moved out of the till. This will reduce the cash ledger balance.', style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'Closing Amount (GHS)', prefixText: '₵ '),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: noteController,
+              decoration: const InputDecoration(labelText: 'Closure Note (Optional)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final amount = double.tryParse(amountController.text);
+              if (amount != null && amount > 0) {
+                final expense = ExpenseRecord(
+                  id: UuidUtils.generate(),
+                  title: noteController.text.isEmpty ? 'Daily Sales Closure' : noteController.text,
+                  category: 'Daily Sales Closure',
+                  amount: amount,
+                  date: closureDate, // Dated correctly to balance the day
+                );
+                
+                final tillState = ref.read(tillProvider);
+                final totalPending = tillState.pendingByDay.values.fold(0.0, (sum, val) => sum + val);
+
+                await ref.read(expenseProvider.notifier).recordCEOWithdrawal(
+                  expense: expense,
+                  currentTillBalance: currentBalance,
+                  totalRemainingAfter: totalPending - amount,
+                );
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Daily sales closed & Security SMS Sent')));
+                }
+              }
+            },
+            child: const Text('Confirm Closure'),
+          ),
+        ],
       ),
     );
   }

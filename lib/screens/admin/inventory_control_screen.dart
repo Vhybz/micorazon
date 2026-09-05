@@ -187,7 +187,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
         SizedBox(
           width: isMobile ? double.infinity : 200,
           child: DropdownButtonFormField<String>(
-            initialValue: _selectedCategory,
+            initialValue: categories.contains(_selectedCategory) ? _selectedCategory : 'All',
             decoration: InputDecoration(
               labelText: 'Sort Category',
               filled: true,
@@ -270,6 +270,16 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
           style: OutlinedButton.styleFrom(
             foregroundColor: Colors.orange.shade800,
             side: BorderSide(color: Colors.orange.shade800),
+          ),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.pushNamed(context, '/admin/product-report'),
+          icon: const Icon(Icons.assessment_outlined, size: 18),
+          label: const Text('Activity Report', style: TextStyle(fontSize: 12)),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: theme.colorScheme.primary,
+            side: BorderSide(color: theme.colorScheme.primary),
           ),
         ),
         const SizedBox(width: 8),
@@ -658,6 +668,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
       'Turkey': ['Whole Turkey', 'Breast', 'Thighs', 'Drumsticks', 'Wings', 'Gizzards', 'Feet', 'Other'],
       'Rabbit': ['Whole Rabbit', 'Legs', 'Saddle', 'Shoulders', 'Other'],
       'Lamb': ['Standard Meat', 'Boneless', 'Chops', 'Other'],
+      'Feeds': ['Dog Feed', 'Other'],
       'Other': ['Custom Entry']
     };
 
@@ -792,7 +803,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         .map((r) => DropdownMenuItem(value: r, child: Text(r.label)))
                         .toList(),
                     onChanged: (v) => setState(() => selectedRange = v),
-                    validator: (v) => ((selectedCategory == 'Hard Chicken (Layer)' || selectedCategory == 'Soft Chicken (Broiler)') && selectedProductName != 'Gizzard' && v == null) ? 'Required' : null,
+                    // validator removed to make it optional, or use the "No Range" option
                   ),
                 ],
                 if (selectedProductName == 'Other' || selectedProductName == 'Custom Entry') ...[
@@ -940,7 +951,9 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                   }
 
                   String finalName = nameController.text;
-                  if ((selectedCategory == 'Hard Chicken (Layer)' || selectedCategory == 'Soft Chicken (Broiler)') && selectedRange != null) {
+                  if ((selectedCategory == 'Hard Chicken (Layer)' || selectedCategory == 'Soft Chicken (Broiler)') && 
+                      selectedRange != null && 
+                      selectedRange!.label != 'No Range') {
                     if (!finalName.contains(selectedRange!.label)) {
                       finalName = '$finalName (${selectedRange!.label})';
                     }
@@ -987,12 +1000,13 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     final costPriceController = TextEditingController(text: product.costPrice.toString());
     final otherCategoryController = TextEditingController();
     final theme = Theme.of(context);
-    String selectedCategory = product.category;
+    
+    final categories = ['Beef', 'Cow', 'Pork', 'Hard Chicken (Layer)', 'Soft Chicken (Broiler)', 'Lamb', 'Goat', 'Turkey', 'Rabbit', 'Feeds', 'Other'];
+    String normalized = _normalizeCategory(product);
+    String selectedCategory = categories.contains(normalized) ? normalized : 'Other';
     bool isUnlimited = product.isUnlimited;
-    final categories = ['Beef', 'Cow', 'Pork', 'Hard Chicken (Layer)', 'Soft Chicken (Broiler)', 'Lamb', 'Goat', 'Other'];
 
-    if (!categories.contains(_normalizeCategory(product))) {
-      selectedCategory = 'Other';
+    if (selectedCategory == 'Other') {
       otherCategoryController.text = product.category;
     }
     
@@ -1274,9 +1288,17 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                             borderRadius: BorderRadius.circular(AppRadius.s),
                             child: product.imageUrl.isEmpty
                                 ? const Icon(Icons.image)
-                                : product.imageUrl.startsWith('assets/')
-                                    ? Image.asset(product.imageUrl, fit: BoxFit.cover)
-                                    : Image.network(product.imageUrl, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.image)),
+                                : (product.imageUrl.startsWith('assets/') && product.imageUrl.isNotEmpty)
+                                    ? Image.asset(
+                                        product.imageUrl, 
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, _, _) => const Icon(Icons.image),
+                                      )
+                                    : Image.network(
+                                        product.imageUrl, 
+                                        fit: BoxFit.cover, 
+                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.image),
+                                      ),
                           ),
                         ),
                         const SizedBox(width: AppSpacing.m),
@@ -1295,7 +1317,14 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                               ),
                               Row(
                                 children: [
-                                  Text(product.category.toUpperCase(), style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold)),
+                                  Flexible(
+                                    child: Text(
+                                      product.category.toUpperCase(), 
+                                      style: const TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
                                   if (hasIncoming) ...[
                                     const SizedBox(width: 8),
                                     Container(
@@ -1382,9 +1411,19 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         children: [
                           product.imageUrl.isEmpty
                               ? Container(color: Theme.of(context).colorScheme.surfaceContainerHighest, child: const Center(child: Icon(Icons.image)))
-                              : product.imageUrl.startsWith('assets/')
-                                  ? Image.asset(product.imageUrl, fit: BoxFit.cover, width: double.infinity)
-                                  : Image.network(product.imageUrl, fit: BoxFit.cover, width: double.infinity, errorBuilder: (context, error, stackTrace) => const Icon(Icons.image)),
+                              : (product.imageUrl.startsWith('assets/') && product.imageUrl.isNotEmpty)
+                                  ? Image.asset(
+                                      product.imageUrl, 
+                                      fit: BoxFit.cover, 
+                                      width: double.infinity,
+                                      errorBuilder: (_, _, _) => const Center(child: Icon(Icons.image)),
+                                    )
+                                  : Image.network(
+                                      product.imageUrl, 
+                                      fit: BoxFit.cover, 
+                                      width: double.infinity, 
+                                      errorBuilder: (context, error, stackTrace) => const Center(child: Icon(Icons.image)),
+                                    ),
                           if (isLowStock)
                             Positioned(
                               top: 8,
@@ -1440,13 +1479,17 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         children: [
                           Row(
                             children: [
-                              Text(
-                                product.category.toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.red,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
+                              Flexible(
+                                child: Text(
+                                  product.category.toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               if (hasIncoming) ...[
@@ -1466,7 +1509,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                               if (isAdmin) _buildItemMenu(context, ref, product),
                             ],
                           ),
-                          Text(product.category, style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11)),
+                          Text(product.category, 
+                            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, fontSize: 11),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           const SizedBox(height: 8),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,

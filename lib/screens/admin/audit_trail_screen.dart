@@ -140,7 +140,7 @@ class _AuditTrailScreenState extends ConsumerState<AuditTrailScreen> {
               decoration: const InputDecoration(labelText: 'Action Type', isDense: true, border: OutlineInputBorder()),
               items: [
                 const DropdownMenuItem(value: null, child: Text('All Actions')),
-                ...['SALE_CREATED', 'SALE_REVERSED', 'STOCK_ADJUSTED', 'PRODUCT_UPDATED', 'USER_PROMOTED', 'USER_SIGNED_IN', 'USER_SIGNED_OUT']
+                ...['SALE_CREATED', 'SALE_REVERSED', 'STOCK_ADJUSTED', 'PRODUCT_UPDATED', 'USER_PROMOTED', 'CEO_WITHDRAWAL', 'WITHDRAWAL_EDITED', 'WITHDRAWAL_DELETED', 'USER_SIGNED_IN', 'USER_SIGNED_OUT']
                     .map((a) => DropdownMenuItem(value: a, child: Text(a.replaceAll('_', ' ')))),
               ],
               onChanged: (v) => setState(() => _selectedAction = v),
@@ -363,13 +363,14 @@ class _AuditTrailScreenState extends ConsumerState<AuditTrailScreen> {
   Color _getActionColor(String action) {
     if (action.contains('REVERTED') || action.contains('DELETE') || action.contains('SIGNED_OUT')) return Colors.red;
     if (action.contains('CREATED') || action.contains('RESTORED') || action.contains('SIGNED_IN')) return Colors.green;
-    if (action.contains('UPDATED') || action.contains('ADJUSTED')) return Colors.blue;
+    if (action.contains('UPDATED') || action.contains('ADJUSTED') || action.contains('EDITED')) return Colors.blue;
     return Colors.orange;
   }
 
   IconData _getActionIcon(String action) {
     if (action.contains('SALE')) return Icons.receipt_long;
     if (action.contains('STOCK')) return Icons.inventory_2;
+    if (action.contains('WITHDRAWAL')) return Icons.money_off_rounded;
     if (action.contains('SIGNED_IN')) return Icons.login_rounded;
     if (action.contains('SIGNED_OUT')) return Icons.logout_rounded;
     if (action.contains('USER')) return Icons.person;

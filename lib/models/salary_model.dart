@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class SalaryRecord {
   final String id;
   final String userId;
@@ -16,6 +18,37 @@ class SalaryRecord {
     required this.targetMonth,
     this.note,
   });
+
+  // Helpers for External Workers
+  bool get isExternal => userId == 'EXTERNAL';
+
+  Map<String, dynamic>? get _externalData {
+    if (!isExternal || note == null) return null;
+    try {
+      final decoded = json.decode(note!);
+      if (decoded is Map<String, dynamic> && decoded.containsKey('external_worker')) {
+        return decoded['external_worker'];
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  String? get externalName => _externalData?['name'];
+  String? get externalPhone => _externalData?['phone'];
+  String? get externalEmail => _externalData?['email'];
+  String? get externalPhotoUrl => _externalData?['photo_url'];
+  double? get externalBaseSalary => _externalData?['base_salary'] != null ? double.tryParse(_externalData?['base_salary'].toString() ?? '') : null;
+  int? get externalPayDay => _externalData?['pay_day'] != null ? int.tryParse(_externalData?['pay_day'].toString() ?? '') : null;
+
+  String? get displayNote {
+    if (!isExternal || note == null) return note;
+    try {
+      final decoded = json.decode(note!);
+      return decoded['user_note'];
+    } catch (_) {
+      return note;
+    }
+  }
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -38,4 +71,24 @@ class SalaryRecord {
         : DateTime.parse(json['date']),
     note: json['note'],
   );
+
+  SalaryRecord copyWith({
+    String? id,
+    String? userId,
+    double? amount,
+    bool? isAdvance,
+    DateTime? date,
+    DateTime? targetMonth,
+    String? note,
+  }) {
+    return SalaryRecord(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      amount: amount ?? this.amount,
+      isAdvance: isAdvance ?? this.isAdvance,
+      date: date ?? this.date,
+      targetMonth: targetMonth ?? this.targetMonth,
+      note: note ?? this.note,
+    );
+  }
 }

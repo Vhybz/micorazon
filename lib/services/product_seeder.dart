@@ -74,6 +74,9 @@ class ProductSeeder {
         'RABBIT': [
           'Whole Rabbit', 'Legs', 'Saddle', 'Shoulders'
         ]
+      },
+      {
+        'FEEDS': ['Dog Feed']
       }
     ];
 

@@ -342,16 +342,29 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
     try {
       final url = await service.uploadProfilePicture(userId, bytes);
       if (url != null) {
-        final user = await _getUser(userId);
-        if (user != null) {
-          final updatedUser = user.copyWith(photoUrl: url);
-          _updateLocalAndSession(updatedUser);
-          await service.updateUser(updatedUser);
+        // Only attempt to update the user record if it's a real system user
+        if (!userId.startsWith('EXT')) {
+          final user = await _getUser(userId);
+          if (user != null) {
+            final updatedUser = user.copyWith(photoUrl: url);
+            _updateLocalAndSession(updatedUser);
+            await service.updateUser(updatedUser);
+          }
         }
       }
       return url;
     } catch (e) {
       debugPrint('Update Photo Error: $e');
+      return null;
+    }
+  }
+
+  Future<String?> uploadExternalPhoto(String identifier, Uint8List bytes) async {
+    try {
+      // Use a distinct prefix for external worker uploads
+      return await service.uploadProfilePicture('EXT_$identifier', bytes);
+    } catch (e) {
+      debugPrint('External Photo Upload Error: $e');
       return null;
     }
   }

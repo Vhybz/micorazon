@@ -24,6 +24,10 @@ import '../../widgets/role_pop_scope.dart';
 import '../../services/report_service.dart';
 import '../../services/birthday_service.dart';
 import '../../widgets/passcode_guard.dart';
+import '../../services/till_provider.dart';
+import '../../core/uuid_utils.dart';
+import '../../models/expense_model.dart';
+import '../../services/daily_reminder_service.dart';
 
 class AdminDashboard extends ConsumerStatefulWidget {
   const AdminDashboard({super.key});
@@ -39,14 +43,15 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
 
   final List<String> _bannerImages = [
     'assets/images/meat_art.jpg',
-    'assets/images/cow_art.jpg',
+    'assets/images/beef_art.jpg',
     'assets/images/pork_art.jpg',
-    'assets/images/cow_art2.jpg',
-    'assets/images/butcher_cow.jpg',
+    'assets/images/beef_art2.jpg',
+    'assets/images/butcher_beef.jpg',
     'assets/images/meat_on_scale.jpg',
-    'assets/images/cow.jpg',
+    'assets/images/beef.jpg',
     'assets/images/pork.jpg',
     'assets/images/chicken.jpg',
+    'assets/images/for_splash.jpg',
   ];
 
   @override
@@ -54,6 +59,11 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
     super.initState();
     _pageController = PageController(initialPage: 0);
     _startTimer();
+    
+    // Check for Daily End-of-Day SMS Reminder
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(dailyReminderServiceProvider).checkAndSendDailySummary();
+    });
   }
 
   void _startTimer() {
@@ -631,7 +641,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
           const SizedBox(height: 4),
           Text(dateStr, style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12)),
           const SizedBox(height: AppSpacing.m),
-          _buildActionButtons(context, isMobile),
+          _buildActionButtons(context, ref, isMobile),
         ],
       );
     }
@@ -669,13 +679,34 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
           ),
         ),
         const SizedBox(width: 16),
-        _buildActionButtons(context, false),
+        _buildActionButtons(context, ref, false),
       ],
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, bool isMobile) {
+  Widget _buildActionButtons(BuildContext context, WidgetRef ref, bool isMobile) {
     final theme = Theme.of(context);
+    final tillState = ref.watch(tillProvider);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    // Calculate Pending Amount for the Current View
+    // If today has pending sales, show today. Otherwise show any pending amount.
+    final double todayPending = tillState.pendingByDay[today] ?? 0.0;
+    final double totalPending = tillState.pendingByDay.values.fold(0.0, (sum, val) => sum + val);
+    
+    final bool hasPending = totalPending > 0.01;
+    final bool hasPastUnclosed = tillState.pendingByDay.keys.any((d) => d.isBefore(today));
+
+    final String label = todayPending > 0.01 
+        ? 'Close Daily Sales (₵${todayPending.toStringAsFixed(0)})'
+        : (hasPending ? 'Clear Pending Cash (₵${totalPending.toStringAsFixed(0)})' : 'Close Daily Sales');
+
+    Color buttonColor = Colors.orange.shade800;
+    if (hasPastUnclosed) {
+      buttonColor = Colors.red.shade700;
+    }
+
     return Wrap(
       spacing: AppSpacing.s,
       runSpacing: AppSpacing.s,
@@ -689,6 +720,20 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
             foregroundColor: theme.colorScheme.primary,
             side: BorderSide(color: theme.colorScheme.primary),
             elevation: 0,
+            padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 12 : 20, 
+              vertical: isMobile ? 10 : 15
+            ),
+          ),
+        ),
+        ElevatedButton.icon(
+          onPressed: !hasPending ? null : () => _handleCloseDailySales(context, ref, amount: todayPending > 0 ? todayPending : totalPending),
+          icon: Icon(hasPending ? (hasPastUnclosed ? Icons.warning_amber_rounded : Icons.lock_clock) : Icons.check_circle_outline, size: 18),
+          label: Text(label),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: hasPending ? buttonColor : Colors.grey,
+            foregroundColor: Colors.white,
+            elevation: hasPending ? 2 : 0,
             padding: EdgeInsets.symmetric(
               horizontal: isMobile ? 12 : 20, 
               vertical: isMobile ? 10 : 15
@@ -722,11 +767,96 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
     );
   }
 
+  void _handleCloseDailySales(BuildContext context, WidgetRef ref, {double? amount}) {
+    final tillState = ref.read(tillProvider);
+    final closingAmount = amount ?? tillState.currentBalance;
+    final amountController = TextEditingController(text: closingAmount.toStringAsFixed(2));
+    final noteController = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.lock_clock, color: Colors.orange),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Daily Sales Closure', overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Verify total cash to be moved out of the till for the day. This will reset the till balance.', 
+              style: TextStyle(fontSize: 12, color: Colors.grey)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Closing Amount (GHS)',
+                prefixText: '₵ ',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: noteController,
+              decoration: const InputDecoration(
+                labelText: 'Closure Note (Optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final finalAmount = double.tryParse(amountController.text);
+              if (finalAmount == null || finalAmount <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid amount')),
+                );
+                return;
+              }
+
+              final expense = ExpenseRecord(
+                id: UuidUtils.generate(),
+                title: noteController.text.isEmpty ? 'Daily Sales Closure' : noteController.text,
+                category: 'Daily Sales Closure',
+                amount: finalAmount,
+                date: DateTime.now(),
+              );
+              
+              final totalPending = tillState.pendingByDay.values.fold(0.0, (sum, val) => sum + val);
+
+              await ref.read(expenseProvider.notifier).recordCEOWithdrawal(
+                expense: expense,
+                currentTillBalance: closingAmount, // This is the 'day' balance we are closing
+                totalRemainingAfter: totalPending - finalAmount,
+              );
+
+              if (context.mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Daily sales closed & Security SMS Sent')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade800, foregroundColor: Colors.white),
+            child: const Text('Confirm Closure'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showExportReportDialog(BuildContext context) {
     final theme = Theme.of(context);
     final searchController = TextEditingController();
     
     final List<Map<String, dynamic>> reports = [
+      {'title': 'CEO Product Activity Report', 'desc': 'Comprehensive product intake, sales & remaining stock audit', 'icon': Icons.assessment, 'cat': 'Executive'},
       {'title': 'Daily Sales Report', 'desc': 'Detailed list of all transactions today', 'icon': Icons.point_of_sale, 'cat': 'Financial'},
       {'title': 'Monthly Revenue Summary', 'desc': 'Financial overview for the current month', 'icon': Icons.account_balance, 'cat': 'Financial'},
       {'title': 'Inventory Audit', 'desc': 'Stock levels and low-stock warnings', 'icon': Icons.inventory_2, 'cat': 'Stock'},
@@ -843,7 +973,11 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
                                     );
                                     
                                     try {
-                                      if (r['title'] == 'Daily Sales Report') {
+                                      if (r['title'] == 'CEO Product Activity Report') {
+                                        if (context.mounted) {
+                                          Navigator.pushNamed(context, '/admin/product-report');
+                                        }
+                                      } else if (r['title'] == 'Daily Sales Report') {
                                         final sales = ref.read(saleHistoryProvider);
                                         await ReportService.generateDailySalesReport(sales, DateTime.now());
                                       } else if (r['title'] == 'Monthly Revenue Summary') {
@@ -941,6 +1075,9 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
 
     final netProfit = grossProfit - totalExpenses;
 
+    final tillState = ref.watch(tillProvider);
+    final totalPending = tillState.pendingByDay.values.fold(0.0, (sum, val) => sum + val);
+
     final theme = Theme.of(context);
 
     int crossAxisCount = isMobile ? 2 : (isTablet ? 4 : 4);
@@ -984,12 +1121,18 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
           mainAxisSpacing: AppSpacing.m,
           childAspectRatio: isMobile ? 1.4 : 1.6,
           children: [
+            InkWell(
+              onTap: () => Navigator.pushNamed(context, '/admin/sales'), // Now points to Sales Analytics where Till Ledger is
+              borderRadius: BorderRadius.circular(AppRadius.m),
+              child: _kpiWithTrend(context, 'Cash at Shop', '₵${totalPending.toStringAsFixed(0)}', Icons.account_balance_wallet_rounded, Colors.orange.shade800, 'TILL'),
+            ),
             _kpiWithTrend(context, 'Total Debt', '₵${totalDebt.toStringAsFixed(0)}', Icons.money_off, Colors.red, 'TOTAL'),
             _kpiWithTrend(context, 'Promo Impact', '₵${totalDiscounts.toStringAsFixed(0)}', Icons.auto_awesome, Colors.orange, 'SAVED'),
-            _kpiWithTrend(context, 'Stock Sold', '${totalWeightSold.toStringAsFixed(1)} kg', Icons.scale, theme.colorScheme.primary, 'LIVE'),
             _kpiWithTrend(context, 'Daily Slaughter', '${todayLogs.length}', Icons.precision_manufacturing, Colors.green, 'TODAY'),
           ],
         ),
+        const SizedBox(height: AppSpacing.m),
+        _kpiWithTrend(context, 'Stock Sold', '${totalWeightSold.toStringAsFixed(1)} kg', Icons.scale, theme.colorScheme.primary, 'LIVE'),
       ],
     );
   }
@@ -1011,7 +1154,6 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
         border: isDark ? Border.all(color: theme.dividerColor) : null,
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
             padding: EdgeInsets.all(isMobile ? 4 : 10),

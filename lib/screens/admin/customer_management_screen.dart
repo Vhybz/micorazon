@@ -206,6 +206,10 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
 
     return LayoutBuilder(builder: (context, constraints) {
       final crossAxisCount = constraints.maxWidth > 1200 ? 4 : (constraints.maxWidth > 800 ? 3 : (constraints.maxWidth > 500 ? 2 : 1));
+      final double childAspectRatio = crossAxisCount == 4
+          ? 1.22
+          : (crossAxisCount == 3 ? 1.28 : (crossAxisCount == 2 ? 1.35 : 1.55));
+
       return GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -214,7 +218,7 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
           crossAxisCount: crossAxisCount,
           crossAxisSpacing: AppSpacing.m,
           mainAxisSpacing: AppSpacing.m,
-          childAspectRatio: 1.5,
+          childAspectRatio: childAspectRatio,
         ),
         itemBuilder: (context, index) {
           final c = customers[index];
@@ -301,39 +305,43 @@ class _CustomerManagementScreenState extends ConsumerState<CustomerManagementScr
                       ),
                     ],
                   ),
-                  const Divider(height: 16),
+                  const Divider(height: 12),
                   Expanded(
-                    child: Row(
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _buildMetricRow(Icons.phone_outlined, c.phone, theme),
-                              if (c.phone2 != null && c.phone2!.isNotEmpty)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 2.0),
-                                  child: _buildMetricRow(Icons.phone_iphone_rounded, c.phone2!, theme),
-                                ),
-                              const SizedBox(height: 4),
-                              _buildMetricRow(Icons.shopping_bag_outlined, 'Orders: ${m?.visitCount ?? 0}', theme),
-                              const SizedBox(height: 4),
-                              _buildMetricRow(Icons.payments_outlined, 'Spent: GHC${m?.totalSpend.toStringAsFixed(2) ?? '0.00'}', theme),
-                              const SizedBox(height: 4),
-                              _buildMetricRow(Icons.money_off_outlined, 'Debt: GHC${m?.totalDebt.toStringAsFixed(2) ?? '0.00'}', theme, color: (m?.totalDebt ?? 0) > 0.01 ? Colors.red : null),
-                            ],
-                          ),
-                        ),
-                        if (m != null && m.recentSpends.length > 1)
+                    child: SingleChildScrollView(
+                      physics: const ClampingScrollPhysics(),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Expanded(
-                            flex: 2,
-                            child: SizedBox(
-                              height: 40,
-                              child: _CustomerTrendGraph(spends: m.recentSpends),
+                            flex: 3,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _buildMetricRow(Icons.phone_outlined, c.phone, theme),
+                                if (c.phone2 != null && c.phone2!.isNotEmpty && c.phone2 != c.phone)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 2.0),
+                                    child: _buildMetricRow(Icons.phone_iphone_rounded, c.phone2!, theme),
+                                  ),
+                                const SizedBox(height: 4),
+                                _buildMetricRow(Icons.shopping_bag_outlined, 'Orders: ${m?.visitCount ?? 0}', theme),
+                                const SizedBox(height: 4),
+                                _buildMetricRow(Icons.payments_outlined, 'Spent: GHC${m?.totalSpend.toStringAsFixed(2) ?? '0.00'}', theme),
+                                const SizedBox(height: 4),
+                                _buildMetricRow(Icons.money_off_outlined, 'Debt: GHC${m?.totalDebt.toStringAsFixed(2) ?? '0.00'}', theme, color: (m?.totalDebt ?? 0) > 0.01 ? Colors.red : null),
+                              ],
                             ),
                           ),
-                      ],
+                          if (m != null && m.recentSpends.length > 1)
+                            Expanded(
+                              flex: 2,
+                              child: SizedBox(
+                                height: 40,
+                                child: _CustomerTrendGraph(spends: m.recentSpends),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 4),

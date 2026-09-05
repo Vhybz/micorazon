@@ -3,7 +3,7 @@ import '../../widgets/app_sidebar.dart';
 import '../../models/user_model.dart';
 
 List<SidebarItem> getAdminMenuItems(UserAccount? user) {
-  final defaultCoreRoutes = {'/admin', '/admin/settings', '/admin/staff', '/admin/salaries'};
+  final defaultCoreRoutes = {'/admin', '/admin/settings', '/admin/staff', '/admin/salaries', '/admin/product-report'};
 
   final allItems = [
     SidebarItem(icon: Icons.dashboard_rounded, label: 'Dashboard', route: '/admin'),
@@ -14,6 +14,7 @@ List<SidebarItem> getAdminMenuItems(UserAccount? user) {
     SidebarItem(icon: Icons.people_outline_rounded, label: 'Customer Directory', route: '/admin/customers'),
     SidebarItem(icon: Icons.account_balance_wallet_rounded, label: 'Debt Tracker', route: '/admin/debts'),
     SidebarItem(icon: Icons.inventory_2_rounded, label: 'Inventory Control', route: '/admin/stock'),
+    SidebarItem(icon: Icons.assessment_rounded, label: 'Product Activity Report', route: '/admin/product-report'),
     SidebarItem(icon: Icons.payments_rounded, label: 'Salary Management', route: '/admin/salaries'),
     SidebarItem(icon: Icons.settings_suggest_rounded, label: 'System Settings', route: '/admin/settings'),
   ];
@@ -21,7 +22,7 @@ List<SidebarItem> getAdminMenuItems(UserAccount? user) {
   if (user == null) return allItems;
 
   return allItems.where((item) {
-    return user.enabledPermissions.contains(item.route);
+    return defaultCoreRoutes.contains(item.route) || user.enabledPermissions.contains(item.route);
   }).map((item) {
     // If it's enabled but not a "core" route, mark it as catchy to stand out
     final isCatchy = !defaultCoreRoutes.contains(item.route);

@@ -406,6 +406,9 @@ class ExpenseManagementScreen extends ConsumerWidget {
                       ref.read(expenseProvider.notifier).addCategory(categoryToSave);
                     }
 
+                    final user = ref.read(currentUserProvider);
+                    final userName = user?.name ?? 'Admin';
+
                     if (isEdit) {
                       final updatedExp = expense.copyWith(
                         title: titleController.text.trim(),
@@ -423,6 +426,7 @@ class ExpenseManagementScreen extends ConsumerWidget {
                         amount: double.tryParse(amountController.text) ?? 0,
                         date: DateTime.now(),
                         receiptUrl: receiptUrl,
+                        notes: 'Recorded by: $userName',
                       );
                       await ref.read(expenseProvider.notifier).addExpense(newExp);
                     }

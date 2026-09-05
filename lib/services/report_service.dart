@@ -7,6 +7,7 @@ import '../models/product.dart';
 import '../models/butcher_models.dart';
 import '../models/expense_model.dart';
 import '../models/user_model.dart';
+import '../models/system_models.dart';
 
 class ReportService {
   static const _primaryMaroon = PdfColor.fromInt(0xFF6B1111);
@@ -428,6 +429,118 @@ class ReportService {
       ),
     );
     await Printing.layoutPdf(onLayout: (format) async => doc.save(), name: 'Slaughter_SOP_v2.1');
+  }
+
+  static Future<void> generateTillLedgerReport(List<TillMovement> history) async {
+    final doc = pw.Document();
+    
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        header: (context) => _buildHeader('Till & Cash Movement Ledger', DateTime.now()),
+        footer: (context) => _buildFooter(context),
+        build: (context) => [
+          _buildSummarySection({
+            'Final Balance': 'GHS ${history.isEmpty ? "0.00" : history.first.runningBalance.toStringAsFixed(2)}',
+            'Total Entries': history.length.toString(),
+          }),
+          pw.SizedBox(height: 20),
+          pw.TableHelper.fromTextArray(
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+            headerDecoration: const pw.BoxDecoration(color: _primaryMaroon),
+            headers: ['Time', 'Action', 'Reference', 'Amount (GHS)', 'Balance (GHS)'],
+            data: history.map((m) => [
+              DateFormat('MM/dd HH:mm').format(m.timestamp),
+              m.title,
+              m.description,
+              '${m.type == TillMovementType.cashOut ? "-" : "+"} ${m.amount.toStringAsFixed(2)}',
+              m.runningBalance.toStringAsFixed(2),
+            ]).toList(),
+          ),
+        ],
+      ),
+    );
+
+    await Printing.layoutPdf(onLayout: (format) async => doc.save(), name: 'Till_Ledger_${DateFormat('yyyyMMdd').format(DateTime.now())}');
+  }
+
+  static Future<void> generateProductActivityReport({
+    required List<ProductActivityReportData> reportData,
+    required DateTime startDate,
+    required DateTime endDate,
+    required String branchName,
+  }) async {
+    final doc = pw.Document();
+
+    final totalIntakes = reportData.fold(0.0, (sum, d) => sum + d.totalIntakeQty);
+    final totalSold = reportData.fold(0.0, (sum, d) => sum + d.totalQtySold);
+    final totalRevenue = reportData.fold(0.0, (sum, d) => sum + d.totalRevenue);
+    final totalRemaining = reportData.fold(0.0, (sum, d) => sum + d.remainingStock);
+
+    final dateRangeStr = '${DateFormat('MMM dd, yyyy').format(startDate)} - ${DateFormat('MMM dd, yyyy').format(endDate)}';
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        header: (context) => _buildHeader('CEO Executive Product Activity Report', DateTime.now()),
+        footer: (context) => _buildFooter(context),
+        build: (context) => [
+          _buildSummarySection({
+            'Report Period': dateRangeStr,
+            'Branch / Entity': branchName,
+            'Products Evaluated': reportData.length.toString(),
+            'Total Quantity Intaked': '${totalIntakes.toStringAsFixed(1)} units/kg',
+            'Total Quantity Sold': '${totalSold.toStringAsFixed(1)} units/kg',
+            'Gross Revenue Generated': 'GHS ${totalRevenue.toStringAsFixed(2)}',
+            'Current Stock Remaining': '${totalRemaining.toStringAsFixed(1)} units/kg',
+          }),
+          pw.SizedBox(height: 15),
+          pw.Text('Itemized Product Movement & Financial Analysis',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 12)),
+          pw.SizedBox(height: 8),
+          pw.TableHelper.fromTextArray(
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+            headerDecoration: const pw.BoxDecoration(color: _primaryMaroon),
+            cellAlignment: pw.Alignment.centerLeft,
+            headers: ['Product Name', 'Category', 'Intaked Qty', 'Qty Sold', 'Revenue (GHS)', 'Remaining Stock'],
+            data: reportData.map((d) => [
+              d.product.name,
+              d.product.category,
+              d.totalIntakeQty > 0 ? '+${d.totalIntakeQty.toStringAsFixed(1)} ${d.product.unit}' : '0.0 ${d.product.unit}',
+              '${d.totalQtySold.toStringAsFixed(1)} ${d.product.unit}',
+              d.totalRevenue.toStringAsFixed(2),
+              '${d.remainingStock.toStringAsFixed(1)} ${d.product.unit}',
+            ]).toList(),
+          ),
+          pw.SizedBox(height: 30),
+          pw.Divider(),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Report Generated For: Executive CEO Review', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                  pw.SizedBox(height: 2),
+                  pw.Text('System Generated Official Report', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+                ],
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                children: [
+                  pw.Text('Printed On: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}', style: const pw.TextStyle(fontSize: 8)),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (format) async => doc.save(),
+      name: 'CEO_Product_Activity_Report_${DateFormat('yyyyMMdd').format(DateTime.now())}',
+    );
   }
 
   static Map<String, Map<String, dynamic>> _groupSalesByDay(List<SaleRecord> sales) {

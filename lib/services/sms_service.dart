@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -35,20 +36,29 @@ class SmsService {
       return false;
     }
 
-    // Format phone number to 233 format (remove leading zero, add 233)
-    String formattedPhone = to.trim().replaceAll(RegExp(r'\s+'), '');
+    // Format phone number to 233 format (remove non-digits, adjust leading zero)
+    String formattedPhone = to.trim().replaceAll(RegExp(r'[^\d]'), '');
     if (formattedPhone.startsWith('0') && formattedPhone.length == 10) {
       formattedPhone = '233${formattedPhone.substring(1)}';
     } else if (formattedPhone.length == 9 && !formattedPhone.startsWith('233')) {
       formattedPhone = '233$formattedPhone';
-    } else if (formattedPhone.startsWith('+')) {
-      formattedPhone = formattedPhone.substring(1);
     }
 
-    // Try Arkesel V2 first (JSON POST), then fallback to V1
+    if (formattedPhone.isEmpty) {
+      debugPrint('SMS Error: Formatted recipient phone number is empty.');
+      return false;
+    }
+
+    // Try Arkesel V2 first (JSON POST with jsonEncode)
     try {
       debugPrint('Attempting to send SMS to $formattedPhone via Arkesel V2...');
       final v2Url = Uri.parse('https://sms.arkesel.com/api/v2/sms/send');
+      final payload = {
+        'sender': senderId,
+        'recipients': [formattedPhone],
+        'message': message,
+      };
+
       final response = await http.post(
         v2Url,
         headers: {
@@ -56,7 +66,7 @@ class SmsService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: '{"sender":"$senderId","recipients":["$formattedPhone"],"message":"${message.replaceAll('"', '\\"')}"}',
+        body: jsonEncode(payload),
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
@@ -81,12 +91,16 @@ class SmsService {
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
-        if (response.body.contains('"code":"1000"') || response.body.contains('1000')) {
-          debugPrint('SMS sent successfully via V1');
+        final bodyLower = response.body.toLowerCase();
+        if (bodyLower.contains('"code":"1000"') || 
+            bodyLower.contains('1000') || 
+            bodyLower.contains('success') ||
+            bodyLower.contains('ok')) {
+          debugPrint('SMS sent successfully via V1: ${response.body}');
           return true;
         }
       }
-      debugPrint('Arkesel V1 Failed: ${response.body}');
+      debugPrint('Arkesel V1 Failed (Status ${response.statusCode}): ${response.body}');
       return false;
     } catch (e) {
       debugPrint('SMS V1 Exception: $e');
@@ -94,27 +108,56 @@ class SmsService {
     }
   }
 
-  static Future<bool> sendReceiptSms(SaleRecord sale, {double? discountAmount, String? branchName, String? customPhone}) async {
-    final String? targetPhone = customPhone ?? sale.customerPhone;
-    if (targetPhone == null || targetPhone.isEmpty) return false;
-    
+  static Future<bool> sendReceiptSms(
+    SaleRecord sale, {
+    double? discountAmount,
+    String? branchName,
+    String? customPhone,
+  }) async {
+    final String? targetPhone = (customPhone != null && customPhone.trim().isNotEmpty)
+        ? customPhone.trim()
+        : sale.customerPhone;
+
+    if (targetPhone == null || targetPhone.trim().isEmpty) {
+      debugPrint('sendReceiptSms: No target phone number provided.');
+      return false;
+    }
+
     final bool isDebt = sale.balance > 0.01;
-    final String typeHeader = isDebt ? 'DEBT INVOICE: ' : 'ORDER CONFIRMATION: ';
+    final String typeHeader = isDebt ? 'DEBT INVOICE' : 'RECEIPT';
     final String shopName = branchName ?? 'Mi~Corazon Butchery';
-    
-    String message = '$typeHeader Hello ${sale.customerName ?? 'Customer'}, your total for order ${sale.id} at $shopName is GHC${sale.totalAmount.toStringAsFixed(2)}.';
-    
+
+    // Format clean receipt ID
+    final String receiptId = sale.id.startsWith('INV-')
+        ? sale.id
+        : (sale.id.length > 8 ? sale.id.substring(sale.id.length - 8).toUpperCase() : sale.id.toUpperCase());
+
+    // Format Item Breakdown
+    final String itemsSummary = sale.items.map((i) {
+      final qty = i.quantity % 1 == 0 ? i.quantity.toInt().toString() : i.quantity.toStringAsFixed(1);
+      return '$qty${i.product.unit} ${i.product.name}';
+    }).join(', ');
+
+    String message = '$typeHeader #$receiptId - $shopName\n';
+    if (sale.customerName != null && sale.customerName!.isNotEmpty && sale.customerName != 'Walk-in Customer') {
+      message += 'Customer: ${sale.customerName}\n';
+    }
+    if (itemsSummary.isNotEmpty) {
+      message += 'Items: $itemsSummary\n';
+    }
+    message += 'Total: GHS ${sale.totalAmount.toStringAsFixed(2)}';
+
     if (isDebt) {
-      message += ' Amount Paid: GHC${sale.amountPaid.toStringAsFixed(2)}. Outstanding Balance (DEBT): GHC${sale.balance.toStringAsFixed(2)}. Please settle as soon as possible.';
+      message += '\nPaid: GHS ${sale.amountPaid.toStringAsFixed(2)}\nBalance Due: GHS ${sale.balance.toStringAsFixed(2)}';
+    } else {
+      message += '\nStatus: Paid';
     }
 
     if (discountAmount != null && discountAmount > 0) {
-      message += ' You saved GHC${discountAmount.toStringAsFixed(2)}! Thank you for being a valued customer.';
-    } else {
-      if (!isDebt) {
-        message += ' Thank you for shopping with us!';
-      }
+      message += '\nSaved: GHS ${discountAmount.toStringAsFixed(2)}';
     }
+
+    message += '\nThank you for shopping with us!';
 
     return await _sendSms(targetPhone, message);
   }
@@ -217,13 +260,7 @@ class SmsService {
     required String itemDetails,
     required List<UserAccount> branchUsers,
   }) async {
-    final String message = 'STOCK ALERT: New stock ($itemDetails) has been transfered to $branchName branch. Please log in to confirm receipt.';
-    final targets = branchUsers
-        .where((u) => u.branchCode == branchCode && u.status == AccountStatus.approved && u.phone != null && u.phone!.isNotEmpty)
-        .toList();
-    for (final user in targets) {
-      await _sendSms(user.phone!, message);
-    }
+    // SMS Stock alert disabled per user request
   }
 
   static Future<void> notifyAdmin({required String title, required String message}) async {
@@ -255,6 +292,43 @@ class SmsService {
     }
     message += ' - Mi~Corazon Management';
     return await _sendSms(phone, message);
+  }
+
+  static Future<bool> sendWithdrawalSms({
+    required String name,
+    required double amount,
+    required double remaining,
+    required String? phone,
+    double? totalRemaining,
+    String action = 'recorded',
+  }) async {
+    String message = 'SECURITY ALERT: CEO Withdrawal $action. Amount: GHS ${amount.toStringAsFixed(2)} by $name. Remaining for day: GHS ${remaining.toStringAsFixed(2)}.';
+    if (totalRemaining != null) {
+      message += ' Total Cash at Shop: GHS ${totalRemaining.toStringAsFixed(2)}.';
+    }
+    
+    // Send to the provided phone number if available, otherwise fallback to admin
+    final targetPhone = (phone != null && phone.isNotEmpty) ? phone : _adminPhone;
+    return await _sendSms(targetPhone, message);
+  }
+
+  static Future<bool> sendDailySummarySms({
+    required double dailySales,
+    required double tillBalance,
+    required List<String> adminPhones,
+  }) async {
+    final String date = DateFormat('EEE, MMM dd').format(DateTime.now());
+    final String message = 'DAILY SUMMARY ($date):\n'
+        '• Today\'s Sales: GHS ${dailySales.toStringAsFixed(2)}\n'
+        '• Cash at Shop: GHS ${tillBalance.toStringAsFixed(2)}\n\n'
+        'Please log in to Close Sales now or tomorrow morning. - Mi~Corazon System';
+
+    bool allSent = true;
+    for (final phone in adminPhones) {
+      final success = await _sendSms(phone, message);
+      if (!success) allSent = false;
+    }
+    return allSent;
   }
 
   static Future<bool> sendCustomSms(String phone, String message) async {

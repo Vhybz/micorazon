@@ -24,6 +24,7 @@ import 'screens/admin/system_maintenance_screen.dart';
 import 'screens/admin/tax_compliance_screen.dart';
 import 'screens/admin/salary_management_screen.dart';
 import 'screens/admin/audit_trail_screen.dart';
+import 'screens/admin/product_activity_report_screen.dart';
 import 'screens/butcher/documents_screen.dart';
 import 'screens/cashier/cashier_pos.dart';
 import 'screens/cashier/stock_verification_screen.dart';
@@ -328,6 +329,7 @@ class MeatShopApp extends ConsumerWidget {
         '/admin/debts': (context) => const DebtManagementScreen(),
         '/admin/stock': (context) => const InventoryControlScreen(),
         '/admin/tax': (context) => const TaxComplianceScreen(),
+        '/admin/product-report': (context) => const ProductActivityReportScreen(),
         '/admin/staff': (context) => const StaffManagementScreen(),
         '/admin/salaries': (context) => const SalaryManagementScreen(),
         '/admin/butcher': (context) => const ButcherAnalyticsScreen(),

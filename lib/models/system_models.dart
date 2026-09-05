@@ -195,3 +195,27 @@ class StockHistory {
     'timestamp': timestamp.toIso8601String(),
   };
 }
+
+enum TillMovementType { cashIn, cashOut, openingBalance, closure }
+
+class TillMovement {
+  final String id;
+  final String title;
+  final String description;
+  final double amount;
+  final DateTime timestamp;
+  final TillMovementType type;
+  final String? userName;
+  final double runningBalance;
+
+  TillMovement({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.amount,
+    required this.timestamp,
+    required this.type,
+    this.userName,
+    this.runningBalance = 0,
+  });
+}

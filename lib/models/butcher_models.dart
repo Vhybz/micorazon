@@ -18,8 +18,8 @@ class ChickenRange {
 
   ChickenRange({required this.minWeight, required this.maxWeight, required this.price});
 
-  String get label => '$minWeight - $maxWeight LB';
-  double get averageWeight => (minWeight + maxWeight) / 2;
+  String get label => (minWeight == 0 && maxWeight == 0) ? 'No Range' : '$minWeight - $maxWeight LB';
+  double get averageWeight => (minWeight == 0 && maxWeight == 0) ? 0 : (minWeight + maxWeight) / 2;
 
   @override
   bool operator ==(Object other) =>
@@ -48,6 +48,7 @@ extension AnimalTypeX on AnimalType {
   List<ChickenRange> get chickenRanges {
     if (this == AnimalType.softChicken) {
       return [
+        ChickenRange(minWeight: 0, maxWeight: 0, price: 0),
         ChickenRange(minWeight: 3.0, maxWeight: 4.0, price: 140),
         ChickenRange(minWeight: 4.1, maxWeight: 5.0, price: 165),
         ChickenRange(minWeight: 5.1, maxWeight: 6.0, price: 170),
@@ -55,6 +56,7 @@ extension AnimalTypeX on AnimalType {
       ];
     } else if (this == AnimalType.hardChicken) {
       return [
+        ChickenRange(minWeight: 0, maxWeight: 0, price: 0),
         ChickenRange(minWeight: 1.5, maxWeight: 1.9, price: 95),
         ChickenRange(minWeight: 2.0, maxWeight: 2.3, price: 100),
         ChickenRange(minWeight: 2.4, maxWeight: 2.8, price: 110),

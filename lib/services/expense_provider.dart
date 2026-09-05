@@ -8,6 +8,9 @@ import 'supabase_expense_service.dart';
 import 'user_provider.dart';
 import 'offline_sync_service.dart';
 
+import 'audit_service.dart';
+import 'sms_service.dart';
+
 class ExpenseState {
   final List<ExpenseRecord> records;
   final List<String> categories;
@@ -29,7 +32,7 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
   ExpenseNotifier(this._service, this.ref) : super(ExpenseState(
     records: [],
-    categories: ['Electricity', 'GRA Tax', 'Water', 'Rent', 'Wages', 'Transport', 'Vet Check', 'Animal Transport', 'Maintenance', 'Bank Deposit'],
+    categories: ['Electricity', 'GRA Tax', 'Water', 'Rent', 'Wages', 'Transport', 'Vet Check', 'Animal Transport', 'Maintenance', 'Bank Deposit', 'CEO Withdrawal', 'Daily Sales Closure', 'Till Opening Balance'],
   )) {
     _init();
   }
@@ -119,6 +122,116 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     }
   }
 
+  Future<void> recordCEOWithdrawal({
+    required ExpenseRecord expense,
+    required double currentTillBalance,
+    double? totalRemainingAfter,
+  }) async {
+    final user = ref.read(currentUserProvider);
+    final userName = user?.name ?? 'Admin';
+    final userPhone = user?.phone;
+    final remaining = currentTillBalance - expense.amount;
+
+    // 1. Save the Expense with recordedBy info embedded in notes to avoid schema conflicts
+    final enrichedExpense = expense.copyWith(
+      notes: '${expense.notes ?? ""}\n(Recorded by: $userName)'.trim(),
+    );
+    await addExpense(enrichedExpense);
+
+    // 2. Log to Audit Trail
+    await AuditService.log(
+      ref: ref,
+      action: 'CEO_WITHDRAWAL',
+      entityType: 'CASH',
+      entityId: expense.id,
+      newData: {
+        'amount': expense.amount,
+        'remaining_balance': remaining,
+        'total_remaining': totalRemainingAfter,
+        'note': expense.title,
+        'taken_by': userName,
+      },
+    );
+
+    // 3. Send Security SMS to the user who made the withdrawal
+    await SmsService.sendWithdrawalSms(
+      name: userName,
+      amount: expense.amount,
+      remaining: remaining,
+      totalRemaining: totalRemainingAfter,
+      phone: userPhone,
+    );
+  }
+
+  Future<void> updateWithdrawal({
+    required ExpenseRecord expense,
+    required double currentTillBalance,
+  }) async {
+    final user = ref.read(currentUserProvider);
+    final userName = user?.name ?? 'Admin';
+    final userPhone = user?.phone;
+    
+    // 1. Update the record
+    await updateExpense(expense);
+
+    // 2. Audit Trail
+    await AuditService.log(
+      ref: ref,
+      action: 'WITHDRAWAL_EDITED',
+      entityType: 'CASH',
+      entityId: expense.id,
+      newData: {
+        'new_amount': expense.amount,
+        'new_remaining': currentTillBalance, 
+        'edited_by': userName,
+      },
+    );
+
+    // 3. Security SMS
+    await SmsService.sendWithdrawalSms(
+      name: userName,
+      amount: expense.amount,
+      remaining: currentTillBalance,
+      phone: userPhone,
+      action: 'EDITED',
+    );
+  }
+
+  Future<void> deleteWithdrawal({
+    required String id,
+    required double amount,
+    required double currentTillBalance,
+  }) async {
+    final user = ref.read(currentUserProvider);
+    final userName = user?.name ?? 'Admin';
+    final userPhone = user?.phone;
+
+    // 1. Delete the record
+    await deleteExpense(id);
+
+    // 2. Audit Trail
+    await AuditService.log(
+      ref: ref,
+      action: 'WITHDRAWAL_DELETED',
+      entityType: 'CASH',
+      entityId: id,
+      newData: {
+        'deleted_amount': amount,
+        'reverted_balance': currentTillBalance,
+        'deleted_by': userName,
+      },
+    );
+
+    // 3. Security SMS
+    await SmsService.sendWithdrawalSms(
+      name: userName,
+      amount: amount,
+      remaining: currentTillBalance,
+      phone: userPhone,
+      action: 'DELETED',
+    );
+  }
+
   Future<void> updateExpense(ExpenseRecord expense) async {
     final user = ref.read(currentUserProvider);
     final expenseWithBranch = expense.copyWith(branchCode: user?.branchCode);
@@ -169,6 +282,16 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
       }
       state = state.copyWith(records: []);
     } catch (_) {}
+  }
+
+  Future<void> purgeCashoutRecords() async {
+    final targets = state.records.where((e) => 
+      e.category == 'CEO Withdrawal' || e.category == 'Till Opening Balance'
+    ).toList();
+    
+    for (final exp in targets) {
+      await deleteExpense(exp.id);
+    }
   }
 
   void addCategory(String category) {

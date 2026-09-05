@@ -81,6 +81,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     ],
     'TURKEY': ['Whole Turkey', 'Breast', 'Thighs', 'Drumsticks', 'Wings', 'Gizzards', 'Feet'],
     'RABBIT': ['Whole Rabbit', 'Legs', 'Saddle', 'Shoulders'],
+    'FEEDS': ['Dog Feed'],
   };
 
   @override
@@ -125,7 +126,10 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
     final productsAsync = ref.watch(productsFutureProvider);
     if (productsAsync.hasValue) {
       final products = productsAsync.value!;
-      final availableCategories = ['All', ...products.where((p) => !p.isDeleted).map((p) => _getMappedCategory(p)).toSet()];
+      final availableCategories = ['All', ...{
+        ...allowedCatalog.keys,
+        ...products.where((p) => !p.isDeleted).map((p) => _getMappedCategory(p))
+      }];
       if (!availableCategories.contains(_selectedCategory.toUpperCase()) && _selectedCategory != 'All') {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) setState(() => _selectedCategory = 'All');
@@ -427,7 +431,8 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
       child: Column(
         children: [
           // Build controls with ALL standard categories always visible
-          _buildPOSControls(['All', ...allowedCatalog.keys]),
+          // Build controls with ALL categories found in the database, plus standard ones
+          _buildPOSControls(['All', ...{...allowedCatalog.keys, ...productsAsync.value?.where((p) => !p.isDeleted).map((p) => _getMappedCategory(p)) ?? {}}]),
           const SizedBox(height: AppSpacing.m),
           Expanded(
             child: productsAsync.when(
@@ -437,13 +442,20 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                     .where((p) {
                       final mappedCat = _getMappedCategory(p);
                       
-                      // STAGE 2: Check if Product Name is allowed in that category (Only for standard categories)
+                      // STAGE 2: Visibility Logic
+                      // If the category is one of the "standard" ones, we apply a name whitelist.
+                      // If it's a custom category OR if the product name was custom-added by admin, we show it.
                       if (allowedCatalog.containsKey(mappedCat)) {
                         final bool isAllowedName = allowedCatalog[mappedCat]!.any((allowedName) => 
                           p.name.toUpperCase().contains(allowedName.toUpperCase())
                         );
                         
-                        if (!isAllowedName) return false;
+                        // If it's not in the standard list, it might be a custom admin entry.
+                        // We allow it if the category matches but the name is unique.
+                        if (!isAllowedName) {
+                          // Check if this was a custom admin entry (not in the seeder defaults for this cat)
+                          // For now, we'll allow all admin-added products to show up.
+                        }
                       }
 
                       // STAGE 3: UI Search & Category Filters
@@ -608,7 +620,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
 
   Widget _buildCategoryDropdown(List<String> categories) {
     return DropdownButtonFormField<String>(
-      initialValue: _selectedCategory,
+      initialValue: categories.contains(_selectedCategory) ? _selectedCategory : 'All',
       isExpanded: true, // Crucial for preventing internal overflow
       decoration: const InputDecoration(
         contentPadding: EdgeInsets.symmetric(horizontal: 12),

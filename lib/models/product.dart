@@ -1,4 +1,5 @@
 import 'customer_model.dart';
+import 'system_models.dart';
 
 enum PromoTarget { retail, wholesale, both }
 enum PromoCustomerTarget { all, regularsOnly }
@@ -249,4 +250,26 @@ class CartItem {
 
   double get total => priceAtSale * quantity;
   double get discount => (originalPrice - priceAtSale) * quantity;
+}
+
+class ProductActivityReportData {
+  final Product product;
+  final double totalIntakeQty;
+  final List<StockHistory> intakeEntries;
+  final DateTime? lastIntakeDate;
+  final double totalQtySold;
+  final double totalRevenue;
+  final List<Map<String, dynamic>> salesBreakdown;
+  final double remainingStock;
+
+  ProductActivityReportData({
+    required this.product,
+    required this.totalIntakeQty,
+    required this.intakeEntries,
+    this.lastIntakeDate,
+    required this.totalQtySold,
+    required this.totalRevenue,
+    required this.salesBreakdown,
+    required this.remainingStock,
+  });
 }
