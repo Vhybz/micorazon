@@ -456,6 +456,7 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
     final theme = Theme.of(context);
     final productsAsync = ref.watch(productsFutureProvider);
     final salesHistory = ref.watch(saleHistoryProvider);
+    final isMobile = ResponsiveLayout.isMobile(context);
     final isDesktop = ResponsiveLayout.isDesktop(context);
     const currentRoute = '/admin/product-report';
 
@@ -516,30 +517,61 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                Icon(Icons.assessment, color: Color(0xFF4A0808), size: 28),
-                                const SizedBox(width: 8),
-                                const Expanded(
-                                  child: Text(
-                                    'CEO Executive Product Activity Report',
-                                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            if (isMobile) ...[
+                              const Row(
+                                children: [
+                                  Icon(Icons.assessment, color: Color(0xFF4A0808), size: 28),
+                                  SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'CEO Executive Product Activity Report',
+                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                    ),
                                   ),
-                                ),
-                                ElevatedButton.icon(
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
                                   onPressed: _isExporting ? null : () => _generatePdfReport(reportData),
                                   icon: _isExporting
                                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                       : const Icon(Icons.picture_as_pdf),
                                   label: Text(_isExporting ? 'Generating PDF...' : 'EXPORT CEO REPORT (PDF)'),
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Color(0xFF4A0808),
+                                    backgroundColor: const Color(0xFF4A0808),
                                     foregroundColor: Colors.white,
                                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                            ] else ...[
+                              Row(
+                                children: [
+                                  const Icon(Icons.assessment, color: Color(0xFF4A0808), size: 28),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'CEO Executive Product Activity Report',
+                                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  ElevatedButton.icon(
+                                    onPressed: _isExporting ? null : () => _generatePdfReport(reportData),
+                                    icon: _isExporting
+                                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                        : const Icon(Icons.picture_as_pdf),
+                                    label: Text(_isExporting ? 'Generating PDF...' : 'EXPORT CEO REPORT (PDF)'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF4A0808),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 16),
                             Wrap(
                               spacing: 12,
@@ -584,7 +616,7 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
                                   },
                                 ),
                                 SizedBox(
-                                  width: 200,
+                                  width: isMobile ? double.infinity : 200,
                                   child: TextField(
                                     decoration: const InputDecoration(
                                       hintText: 'Search product...',
