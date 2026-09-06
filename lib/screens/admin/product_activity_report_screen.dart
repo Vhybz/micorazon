@@ -465,13 +465,29 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
 
     final reportData = _computeReportData(products, salesHistory);
 
-    final totalIntakesCount = reportData.fold(0.0, (sum, d) => sum + d.totalIntakeQty);
-    final totalSoldQty = reportData.fold(0.0, (sum, d) => sum + d.totalQtySold);
+    double intakesKg = 0.0, intakesUnits = 0.0;
+    double soldKg = 0.0, soldUnits = 0.0;
+    double stockKg = 0.0, stockUnits = 0.0;
     final totalRevenueGenerated = reportData.fold(0.0, (sum, d) => sum + d.totalRevenue);
-    final totalRemainingStock = reportData.fold(0.0, (sum, d) => sum + d.remainingStock);
 
-    final unitsSet = reportData.map((d) => d.product.unit).where((u) => u.isNotEmpty).toSet();
-    final String qtyUnit = unitsSet.length == 1 ? unitsSet.first : (unitsSet.isEmpty ? 'kg' : 'units');
+    for (final d in reportData) {
+      final u = d.product.unit.trim().toLowerCase();
+      final isKg = u == 'kg' || u == 'kgs' || u == 'kilogram' || u == 'kilograms';
+      if (isKg) {
+        intakesKg += d.totalIntakeQty;
+        soldKg += d.totalQtySold;
+        stockKg += d.remainingStock;
+      } else {
+        intakesUnits += d.totalIntakeQty;
+        soldUnits += d.totalQtySold;
+        stockUnits += d.remainingStock;
+      }
+    }
+
+    final intakesFormatted = _formatQtyKPI(intakesKg, intakesUnits);
+    final soldFormatted = _formatQtyKPI(soldKg, soldUnits);
+    final stockFormatted = _formatQtyKPI(stockKg, stockUnits);
+
     final currencyFormat = NumberFormat('#,##0.00', 'en_US');
 
     return RolePopScope(
@@ -640,14 +656,40 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
                       crossAxisCount: isDesktop ? 4 : 2,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      childAspectRatio: isDesktop ? 2.2 : 1.8,
+                      childAspectRatio: isDesktop ? 2.2 : 1.7,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       children: [
-                        _kpiCard('Total Product Intakes', totalIntakesCount.toStringAsFixed(1), Icons.add_business_rounded, Colors.blue, unit: qtyUnit),
-                        _kpiCard('Total Quantity Sold', totalSoldQty.toStringAsFixed(1), Icons.shopping_cart_checkout_rounded, Colors.purple, unit: qtyUnit),
-                        _kpiCard('Total Revenue Generated', '₵${currencyFormat.format(totalRevenueGenerated)}', Icons.monetization_on_rounded, Colors.green),
-                        _kpiCard('Total Remaining Stock', totalRemainingStock.toStringAsFixed(1), Icons.inventory_rounded, Colors.orange, unit: qtyUnit),
+                        _kpiCard(
+                          'Total Product Intakes',
+                          intakesFormatted.primaryValue,
+                          Icons.add_business_rounded,
+                          Colors.blue,
+                          unit: intakesFormatted.primaryUnit,
+                          secondaryValue: intakesFormatted.secondaryText,
+                        ),
+                        _kpiCard(
+                          'Total Quantity Sold',
+                          soldFormatted.primaryValue,
+                          Icons.shopping_cart_checkout_rounded,
+                          Colors.purple,
+                          unit: soldFormatted.primaryUnit,
+                          secondaryValue: soldFormatted.secondaryText,
+                        ),
+                        _kpiCard(
+                          'Total Revenue Generated',
+                          '₵${currencyFormat.format(totalRevenueGenerated)}',
+                          Icons.monetization_on_rounded,
+                          Colors.green,
+                        ),
+                        _kpiCard(
+                          'Total Remaining Stock',
+                          stockFormatted.primaryValue,
+                          Icons.inventory_rounded,
+                          Colors.orange,
+                          unit: stockFormatted.primaryUnit,
+                          secondaryValue: stockFormatted.secondaryText,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 20),
@@ -792,7 +834,45 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
     );
   }
 
-  Widget _kpiCard(String title, String value, IconData icon, Color color, {String? unit}) {
+  ({String primaryValue, String primaryUnit, String? secondaryText}) _formatQtyKPI(
+    double qtyKg, 
+    double qtyUnits,
+  ) {
+    if (qtyKg > 0 && qtyUnits > 0) {
+      return (
+        primaryValue: qtyKg.toStringAsFixed(1),
+        primaryUnit: 'kg',
+        secondaryText: '+ ${qtyUnits.toStringAsFixed(1)} units',
+      );
+    } else if (qtyKg > 0) {
+      return (
+        primaryValue: qtyKg.toStringAsFixed(1),
+        primaryUnit: 'kg',
+        secondaryText: null,
+      );
+    } else if (qtyUnits > 0) {
+      return (
+        primaryValue: qtyUnits.toStringAsFixed(1),
+        primaryUnit: 'units',
+        secondaryText: null,
+      );
+    } else {
+      return (
+        primaryValue: '0.0',
+        primaryUnit: 'kg',
+        secondaryText: null,
+      );
+    }
+  }
+
+  Widget _kpiCard(
+    String title, 
+    String value, 
+    IconData icon, 
+    Color color, {
+    String? unit,
+    String? secondaryValue,
+  }) {
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -837,6 +917,13 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
                 ],
               ],
             ),
+            if (secondaryValue != null && secondaryValue.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                secondaryValue,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.grey.shade600),
+              ),
+            ],
           ],
         ),
       ),

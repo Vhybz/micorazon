@@ -472,10 +472,36 @@ class ReportService {
   }) async {
     final doc = pw.Document();
 
-    final totalIntakes = reportData.fold(0.0, (sum, d) => sum + d.totalIntakeQty);
-    final totalSold = reportData.fold(0.0, (sum, d) => sum + d.totalQtySold);
+    double intakesKg = 0.0, intakesUnits = 0.0;
+    double soldKg = 0.0, soldUnits = 0.0;
+    double stockKg = 0.0, stockUnits = 0.0;
     final totalRevenue = reportData.fold(0.0, (sum, d) => sum + d.totalRevenue);
-    final totalRemaining = reportData.fold(0.0, (sum, d) => sum + d.remainingStock);
+
+    for (final d in reportData) {
+      final u = d.product.unit.trim().toLowerCase();
+      final isKg = u == 'kg' || u == 'kgs' || u == 'kilogram' || u == 'kilograms';
+      if (isKg) {
+        intakesKg += d.totalIntakeQty;
+        soldKg += d.totalQtySold;
+        stockKg += d.remainingStock;
+      } else {
+        intakesUnits += d.totalIntakeQty;
+        soldUnits += d.totalQtySold;
+        stockUnits += d.remainingStock;
+      }
+    }
+
+    String formatQtySummary(double kg, double units) {
+      if (kg > 0 && units > 0) {
+        return '${kg.toStringAsFixed(1)} kg (+ ${units.toStringAsFixed(1)} units)';
+      } else if (kg > 0) {
+        return '${kg.toStringAsFixed(1)} kg';
+      } else if (units > 0) {
+        return '${units.toStringAsFixed(1)} units';
+      } else {
+        return '0.0 kg';
+      }
+    }
 
     final dateRangeStr = '${DateFormat('MMM dd, yyyy').format(startDate)} - ${DateFormat('MMM dd, yyyy').format(endDate)}';
 
@@ -489,10 +515,10 @@ class ReportService {
             'Report Period': dateRangeStr,
             'Branch / Entity': branchName,
             'Products Evaluated': reportData.length.toString(),
-            'Total Quantity Intaked': '${totalIntakes.toStringAsFixed(1)} units/kg',
-            'Total Quantity Sold': '${totalSold.toStringAsFixed(1)} units/kg',
+            'Total Quantity Intaked': formatQtySummary(intakesKg, intakesUnits),
+            'Total Quantity Sold': formatQtySummary(soldKg, soldUnits),
             'Gross Revenue Generated': 'GHS ${totalRevenue.toStringAsFixed(2)}',
-            'Current Stock Remaining': '${totalRemaining.toStringAsFixed(1)} units/kg',
+            'Current Stock Remaining': formatQtySummary(stockKg, stockUnits),
           }),
           pw.SizedBox(height: 15),
           pw.Text('Itemized Product Movement & Financial Analysis',
