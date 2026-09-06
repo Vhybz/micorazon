@@ -361,8 +361,6 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             runSpacing: 8,
             children: actionButtons,
           ),
-          ...actionButtons,
-        ],
       ],
     );
   }
