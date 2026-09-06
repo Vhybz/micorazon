@@ -1757,6 +1757,8 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                   }
                 }
 
+                final isMobile = ResponsiveLayout.isMobile(context);
+
                 return Card(
                   elevation: hasPending ? 4 : 1,
                   margin: const EdgeInsets.only(bottom: 16),
@@ -1774,73 +1776,147 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: (hasPending ? (isPast ? Colors.red : Colors.green) : Colors.grey).withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Icon(
-                                hasPending 
-                                  ? (isPast ? Icons.warning_amber_rounded : Icons.calendar_today_rounded)
-                                  : Icons.check_circle_rounded,
-                                color: hasPending 
-                                  ? (isPast ? Colors.red : Colors.green.shade700)
-                                  : Colors.grey,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    isToday ? 'TODAY\'S SALES' : DateFormat('EEEE, MMM dd').format(date).toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.2,
-                                      color: hasPending 
-                                        ? (isPast ? Colors.red : Colors.green.shade700)
-                                        : Colors.grey,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    hasPending ? '₵ ${pendingAmount.toStringAsFixed(2)}' : 'Fully Closed',
-                                    style: TextStyle(
-                                      fontSize: 22, 
-                                      fontWeight: FontWeight.w900,
-                                      color: hasPending ? theme.colorScheme.onSurface : Colors.grey
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (hasPending)
-                              ElevatedButton.icon(
-                                onPressed: () => _handleCloseDailySales(
-                                  context, 
-                                  ref, 
-                                  pendingAmount, 
-                                  targetDate: date,
-                                  initialNote: 'Closure for ${DateFormat('yyyy-MM-dd').format(date)}',
+                        if (isMobile) ...[
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: (hasPending ? (isPast ? Colors.red : Colors.green) : Colors.grey).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                                icon: const Icon(Icons.lock_clock, size: 16),
-                                label: const Text('TAKE CASH', style: TextStyle(fontWeight: FontWeight.bold)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: isPast ? Colors.red.shade700 : Colors.green.shade700,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                child: Icon(
+                                  hasPending 
+                                    ? (isPast ? Icons.warning_amber_rounded : Icons.calendar_today_rounded)
+                                    : Icons.check_circle_rounded,
+                                  color: hasPending 
+                                    ? (isPast ? Colors.red : Colors.green.shade700)
+                                    : Colors.grey,
+                                  size: 18,
                                 ),
-                              )
-                            else
-                              const Icon(Icons.verified_user_rounded, color: Colors.green, size: 28),
-                          ],
-                        ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  isToday ? 'TODAY\'S SALES' : DateFormat('EEEE, MMM dd').format(date).toUpperCase(),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.8,
+                                    color: hasPending 
+                                      ? (isPast ? Colors.red : Colors.green.shade700)
+                                      : Colors.grey,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Text(
+                                hasPending ? '₵ ${pendingAmount.toStringAsFixed(2)}' : 'Fully Closed',
+                                style: TextStyle(
+                                  fontSize: 20, 
+                                  fontWeight: FontWeight.w900,
+                                  color: hasPending ? theme.colorScheme.onSurface : Colors.grey
+                                ),
+                              ),
+                              if (hasPending)
+                                ElevatedButton.icon(
+                                  onPressed: () => _handleCloseDailySales(
+                                    context, 
+                                    ref, 
+                                    pendingAmount, 
+                                    targetDate: date,
+                                    initialNote: 'Closure for ${DateFormat('yyyy-MM-dd').format(date)}',
+                                  ),
+                                  icon: const Icon(Icons.lock_clock, size: 16),
+                                  label: const Text('TAKE CASH', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isPast ? Colors.red.shade700 : Colors.green.shade700,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                )
+                              else
+                                const Icon(Icons.verified_user_rounded, color: Colors.green, size: 24),
+                            ],
+                          ),
+                        ] else ...[
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: (hasPending ? (isPast ? Colors.red : Colors.green) : Colors.grey).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  hasPending 
+                                    ? (isPast ? Icons.warning_amber_rounded : Icons.calendar_today_rounded)
+                                    : Icons.check_circle_rounded,
+                                  color: hasPending 
+                                    ? (isPast ? Colors.red : Colors.green.shade700)
+                                    : Colors.grey,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isToday ? 'TODAY\'S SALES' : DateFormat('EEEE, MMM dd').format(date).toUpperCase(),
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 1.2,
+                                        color: hasPending 
+                                          ? (isPast ? Colors.red : Colors.green.shade700)
+                                          : Colors.grey,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      hasPending ? '₵ ${pendingAmount.toStringAsFixed(2)}' : 'Fully Closed',
+                                      style: TextStyle(
+                                        fontSize: 22, 
+                                        fontWeight: FontWeight.w900,
+                                        color: hasPending ? theme.colorScheme.onSurface : Colors.grey
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (hasPending)
+                                ElevatedButton.icon(
+                                  onPressed: () => _handleCloseDailySales(
+                                    context, 
+                                    ref, 
+                                    pendingAmount, 
+                                    targetDate: date,
+                                    initialNote: 'Closure for ${DateFormat('yyyy-MM-dd').format(date)}',
+                                  ),
+                                  icon: const Icon(Icons.lock_clock, size: 16),
+                                  label: const Text('TAKE CASH', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isPast ? Colors.red.shade700 : Colors.green.shade700,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  ),
+                                )
+                              else
+                                const Icon(Icons.verified_user_rounded, color: Colors.green, size: 28),
+                            ],
+                          ),
+                        ],
                         
                         // Closure History (New)
                         if (closures.isNotEmpty) ...[
