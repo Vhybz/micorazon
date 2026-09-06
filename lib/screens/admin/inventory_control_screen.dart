@@ -396,7 +396,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
   void _showPromotionDialog(BuildContext context, WidgetRef ref, List<Product> products, {Product? initialProduct}) {
     final formKey = GlobalKey<FormState>();
     final percentageController = TextEditingController(
-      text: initialProduct != null ? initialProduct.discountPercentage.toInt().toString() : ''
+      text: initialProduct != null 
+        ? (initialProduct.discountPercentage % 1 == 0 
+            ? initialProduct.discountPercentage.toInt().toString() 
+            : initialProduct.discountPercentage.toString())
+        : ''
     );
     final theme = Theme.of(context);
     DateTime? startDate = initialProduct?.promoStartDate;
@@ -442,14 +446,16 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                         controller: percentageController,
                         decoration: const InputDecoration(
                           labelText: 'Discount Percentage (%)',
-                          hintText: 'e.g. 10',
+                          hintText: 'e.g. 10 or 12.5',
                         ),
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                        ],
                         validator: (v) {
                           if (v == null || v.isEmpty) return 'Required';
                           final n = double.tryParse(v);
-                          if (n == null || n <= 0 || n > 100) return 'Invalid % (1-100)';
+                          if (n == null || n <= 0 || n > 100) return 'Invalid % (0.1 - 100)';
                           return null;
                         },
                       ),
@@ -1466,8 +1472,8 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                                 decoration: BoxDecoration(color: Colors.orange, borderRadius: BorderRadius.circular(4)),
                                 child: Text(
                                   product.promoCustomerTarget == PromoCustomerTarget.regularsOnly 
-                                    ? '-${product.discountPercentage.toInt()}% REGULARS' 
-                                    : '-${product.discountPercentage.toInt()}% PROMO', 
+                                    ? '-${product.discountPercentage % 1 == 0 ? product.discountPercentage.toInt() : product.discountPercentage}% REGULARS' 
+                                    : '-${product.discountPercentage % 1 == 0 ? product.discountPercentage.toInt() : product.discountPercentage}% PROMO', 
                                   style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)
                                 ),
                               ),

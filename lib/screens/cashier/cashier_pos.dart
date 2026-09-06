@@ -528,7 +528,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                       isUnlimited: product.isUnlimited,
                       lowStockThreshold: product.lowStockThreshold,
                       unit: product.unit,
-                      promoLabel: hasPromo ? '${product.name} - ${product.discountPercentage.toInt()}% OFF' : null,
+                      promoLabel: hasPromo ? '${product.name} - ${product.discountPercentage % 1 == 0 ? product.discountPercentage.toInt() : product.discountPercentage}% OFF' : null,
                       imageUrl: product.imageUrl,
                       isInTransit: productInTransit,
                       onTap: isPriced ? () => _showWeightInputDialog(product) : () {
