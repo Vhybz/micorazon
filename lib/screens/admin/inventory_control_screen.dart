@@ -209,16 +209,13 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
 
     final actionButtons = [
       if (pendingTransfers.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(right: 8),
-          child: ElevatedButton.icon(
-            onPressed: () => Navigator.pushNamed(context, '/cashier/verify-stock'),
-            icon: const Icon(Icons.qr_code_scanner, size: 18),
-            label: Text('Verify Incoming (${pendingTransfers.length})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange.shade800,
-              foregroundColor: Colors.white,
-            ),
+        ElevatedButton.icon(
+          onPressed: () => Navigator.pushNamed(context, '/cashier/verify-stock'),
+          icon: const Icon(Icons.qr_code_scanner, size: 18),
+          label: Text('Verify Incoming (${pendingTransfers.length})', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.orange.shade800,
+            foregroundColor: Colors.white,
           ),
         ),
       if (isAdmin) ...[
@@ -262,7 +259,6 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             ),
           ],
         ),
-        const SizedBox(width: 8),
         OutlinedButton.icon(
           onPressed: () => _showPromotionDialog(context, ref, products),
           icon: const Icon(Icons.campaign_outlined, size: 18),
@@ -272,7 +268,6 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             side: BorderSide(color: Colors.orange.shade800),
           ),
         ),
-        const SizedBox(width: 8),
         OutlinedButton.icon(
           onPressed: () => Navigator.pushNamed(context, '/admin/product-report'),
           icon: const Icon(Icons.assessment_outlined, size: 18),
@@ -282,7 +277,6 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             side: BorderSide(color: theme.colorScheme.primary),
           ),
         ),
-        const SizedBox(width: 8),
         OutlinedButton.icon(
           onPressed: () async {
             final confirm = await showDialog<bool>(
@@ -318,10 +312,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Master Stock List', 
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurface),
             overflow: TextOverflow.ellipsis,
             maxLines: 1,
           ),
+          const SizedBox(height: 2),
           Text('Manage products, pricing, and stock levels', 
             style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12),
             overflow: TextOverflow.ellipsis,
@@ -329,7 +324,11 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
           ),
           if (actionButtons.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.m),
-            Row(children: actionButtons.map((w) => w is SizedBox ? w : Expanded(child: w)).toList()),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: actionButtons,
+            ),
           ],
         ],
       );
@@ -356,8 +355,12 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
             ],
           ),
         ),
-        if (actionButtons.isNotEmpty) ...[
-          const SizedBox(width: 16),
+        if (actionButtons.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: actionButtons,
+          ),
           ...actionButtons,
         ],
       ],
