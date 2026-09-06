@@ -740,30 +740,7 @@ class _AdminDashboardState extends ConsumerState<AdminDashboard> {
             ),
           ),
         ),
-        ElevatedButton.icon(
-          onPressed: () => _handleQuickAddStaff(context),
-          icon: const Icon(Icons.add, size: 18),
-          label: const Text('Add Staff'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: theme.colorScheme.primary,
-            foregroundColor: Colors.white,
-            elevation: 2,
-            padding: EdgeInsets.symmetric(
-              horizontal: isMobile ? 12 : 20, 
-              vertical: isMobile ? 10 : 15
-            ),
-          ),
-        ),
       ],
-    );
-  }
-
-  void _handleQuickAddStaff(BuildContext context) {
-    // Navigate to staff management and use the callback to open dialog
-    Navigator.pushReplacementNamed(context, '/admin/staff');
-    // Note: In a real app, we might pass a flag in arguments to auto-open the dialog
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Opening Staff Registration...'), duration: Duration(seconds: 1)),
     );
   }
 
