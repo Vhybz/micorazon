@@ -131,7 +131,25 @@ class OfflineSyncService {
             success = true;
             break;
           case 'UPDATE_PRODUCT':
-            await SupabaseConfig.client.from('products').upsert(payload);
+            try {
+              await SupabaseConfig.client.from('products').upsert(payload);
+            } catch (e) {
+              final err = e.toString();
+              bool retried = false;
+              if (err.contains('PGRST204') || err.contains('target_customer_id')) {
+                payload.remove('target_customer_id');
+                retried = true;
+              }
+              if (err.contains('23503') || err.contains('foreign key') || err.contains('products_branch_code_fkey')) {
+                payload['branch_code'] = null;
+                retried = true;
+              }
+              if (retried) {
+                await SupabaseConfig.client.from('products').upsert(payload);
+              } else {
+                rethrow;
+              }
+            }
             success = true;
             break;
           case 'CUT':
@@ -245,8 +263,14 @@ class OfflineSyncService {
         }
 
         // 3. NETWORK ERROR: Keep in queue and stop the loop to save battery/data
-        if (errorStr.contains('SOCKETEXCEPTION') || errorStr.contains('NETWORK_ERROR') || errorStr.contains('FAILED HOST LOOKUP')) {
-          debugPrint('Sync Monitor: Offline. Pausing sync loop.');
+        if (errorStr.contains('SOCKETEXCEPTION') || 
+            errorStr.contains('NETWORK_ERROR') || 
+            errorStr.contains('FAILED HOST LOOKUP') ||
+            errorStr.contains('CLIENTEXCEPTION') ||
+            errorStr.contains('FAILED TO FETCH') ||
+            errorStr.contains('CONNECTION') ||
+            errorStr.contains('TIMEOUT')) {
+          debugPrint('Sync Monitor: Network error or offline. Pausing sync loop.');
           break;
         }
       }

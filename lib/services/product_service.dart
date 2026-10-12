@@ -54,15 +54,56 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
       }
     });
 
+    int heartbeatCount = 0;
     // 2. Background Heartbeat: Silent refresh logic every 3 seconds
     ref.listen(liveHeartbeatProvider, (_, _) {
       final products = state.value;
       if (products != null) {
         _checkStockAlerts(products);
       }
+
+      // Every 3 ticks (every 9s), perform silent background re-fetch from Supabase DB
+      // to guarantee identical prices, units, and stock across all cashier devices & accounts
+      heartbeatCount++;
+      if (heartbeatCount % 3 == 0) {
+        loadProducts();
+      }
     });
     
     _startSubscription();
+  }
+
+  List<Product> _mergeWithPendingQueue(List<Product> baseProducts) {
+    try {
+      final Map<String, Product> productMap = {
+        for (var p in baseProducts) p.id: p
+      };
+
+      // 1. Merge pending UPDATE_PRODUCT items from Hive queue
+      final pendingUpdates = OfflineSyncService.getPendingItems('UPDATE_PRODUCT');
+      for (var json in pendingUpdates) {
+        try {
+          final p = Product.fromJson(json);
+          productMap[p.id] = p;
+        } catch (e) {
+          debugPrint('Error parsing pending product: $e');
+        }
+      }
+
+      // 2. Filter out pending DELETE_PRODUCT items from Hive queue
+      final pendingDeletes = OfflineSyncService.getPendingItems('DELETE_PRODUCT');
+      for (var json in pendingDeletes) {
+        final id = json['id']?.toString();
+        if (id != null) {
+          productMap.remove(id);
+        }
+      }
+
+      return productMap.values.toList();
+    } catch (e) {
+      debugPrint('Error merging pending products: $e');
+      return baseProducts;
+    }
   }
 
   void _loadFromCache() {
@@ -72,8 +113,9 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         final List<Product> cached = box.values
             .map((json) => Product.fromJson(Map<String, dynamic>.from(json)))
             .toList();
-        state = AsyncValue.data(cached);
-        debugPrint('Product Engine: ${cached.length} products loaded from local cache.');
+        final merged = _mergeWithPendingQueue(cached);
+        state = AsyncValue.data(merged);
+        debugPrint('Product Engine: ${merged.length} products loaded from local cache.');
       }
     } catch (e) {
       debugPrint('Product Engine Cache Error: $e');
@@ -96,25 +138,26 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
   void _startSubscription() {
     _subscription?.cancel();
     final user = ref.read(currentUserProvider);
-    if (user != null && user.branchCode != null) {
-      _subscription = _service.watchProducts(user.branchCode!).listen(
-        (products) {
-          state = AsyncValue.data(products);
-          _saveToCache(products); // Persist for next offline session
-          _checkStockAlerts(products);
-        },
-        onError: (e, st) {
-          debugPrint('Product Stream Connection Error (Resuming?): $e');
-          // If we already have data, don't trigger error state (avoids red screen)
-          if (!state.hasValue) {
-             state = AsyncValue.error(e, st);
-          }
-        },
-        cancelOnError: false,
-      );
-    } else {
-      state = const AsyncValue.data([]);
-    }
+    final String branchCode = user?.branchCode ?? '';
+
+    _subscription = _service.watchProducts(branchCode).listen(
+      (products) {
+        final merged = _mergeWithPendingQueue(products);
+        state = AsyncValue.data(merged);
+        _saveToCache(merged); // Persist for next offline session
+        _checkStockAlerts(merged);
+      },
+      onError: (e, st) {
+        debugPrint('Product Stream Connection Error (Resuming?): $e');
+        if (!state.hasValue) {
+           state = AsyncValue.error(e, st);
+        }
+      },
+      cancelOnError: false,
+    );
+
+    // REST fallback sync to guarantee immediate initial update
+    loadProducts();
   }
 
   void _checkStockAlerts(List<Product> products) {
@@ -147,38 +190,63 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
   }
 
   Future<void> loadProducts() async {
-    // The stream handles loading automatically, but we can keep this for manual refreshes if needed
-    _startSubscription();
+    try {
+      final user = ref.read(currentUserProvider);
+      final String branchCode = user?.branchCode ?? '';
+      final products = await _service.getProducts(branchCode);
+      final merged = _mergeWithPendingQueue(products);
+      state = AsyncValue.data(merged);
+      _saveToCache(merged);
+      _checkStockAlerts(merged);
+    } catch (e) {
+      debugPrint('Product Engine Direct Load Error: $e');
+    }
   }
 
   Future<void> addProduct(Product product) async {
     final user = ref.read(currentUserProvider);
-    final productWithBranch = product.copyWith(branchCode: user?.branchCode);
+    final productWithBranch = product.copyWith(
+      branchCode: product.branchCode ?? user?.branchCode,
+    );
     
+    // 1. Add to Offline Queue FIRST so it is immediately protected from being wiped by any background stream refresh
+    await OfflineSyncService.addToQueue(
+      actionType: 'UPDATE_PRODUCT',
+      data: productWithBranch.toJson(),
+    );
+
+    // 2. Optimistic local state update for immediate UI responsiveness everywhere
+    final currentList = state.value ?? [];
+    final existingIndex = currentList.indexWhere((p) => p.id == productWithBranch.id);
+    List<Product> newList;
+    if (existingIndex >= 0) {
+      newList = [...currentList];
+      newList[existingIndex] = productWithBranch;
+    } else {
+      newList = [productWithBranch, ...currentList];
+    }
+    state = AsyncValue.data(newList);
+    _saveToCache(newList);
+
     try {
       final connectivity = await Connectivity().checkConnectivity();
       if (!connectivity.contains(ConnectivityResult.none)) {
         await _service.addProduct(productWithBranch);
-      } else {
-        throw Exception('Offline');
+        await loadProducts();
       }
     } catch (e) {
-      // Use Offline Queue
-      await OfflineSyncService.addToQueue(
-        actionType: 'UPDATE_PRODUCT',
-        data: productWithBranch.toJson(),
-      );
-      
-      // Update local state immediately for responsiveness
-      state.whenData((products) {
-        final newList = [...products, productWithBranch];
-        state = AsyncValue.data(newList);
-        _saveToCache(newList);
-      });
+      debugPrint('Add Product error or offline, already queued: $e');
     }
   }
 
   Future<void> updateProduct(Product updatedProduct) async {
+    // 1. Optimistic local update
+    state.whenData((products) {
+      final newList = products.map((p) => p.id == updatedProduct.id ? updatedProduct : p).toList();
+      state = AsyncValue.data(newList);
+      _saveToCache(newList);
+    });
+
     try {
       final oldProduct = state.value?.firstWhere((p) => p.id == updatedProduct.id);
       
@@ -195,6 +263,7 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
       final connectivity = await Connectivity().checkConnectivity();
       if (!connectivity.contains(ConnectivityResult.none)) {
         await _service.updateProduct(updatedProduct);
+        await loadProducts();
       } else {
         throw Exception('Offline');
       }
@@ -203,20 +272,22 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         actionType: 'UPDATE_PRODUCT',
         data: updatedProduct.toJson(),
       );
-
-      state.whenData((products) {
-        final newList = products.map((p) => p.id == updatedProduct.id ? updatedProduct : p).toList();
-        state = AsyncValue.data(newList);
-        _saveToCache(newList);
-      });
     }
   }
 
   Future<void> deleteProduct(String id) async {
+    // 1. Optimistic local update
+    state.whenData((products) {
+      final newList = products.where((p) => p.id != id).toList();
+      state = AsyncValue.data(newList);
+      _saveToCache(newList);
+    });
+
     try {
       final connectivity = await Connectivity().checkConnectivity();
       if (!connectivity.contains(ConnectivityResult.none)) {
         await _service.deleteProduct(id);
+        await loadProducts();
       } else {
         throw Exception('Offline');
       }
@@ -225,12 +296,6 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
         actionType: 'DELETE_PRODUCT',
         data: {'id': id},
       );
-
-      state.whenData((products) {
-        final newList = products.where((p) => p.id != id).toList();
-        state = AsyncValue.data(newList);
-        _saveToCache(newList);
-      });
     }
   }
 
@@ -312,12 +377,6 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
             'change_amount': quantityChange,
             'timestamp': now.toIso8601String(),
           },
-        );
-        
-        // Also send a general update for metadata (daily added, etc.)
-        await OfflineSyncService.addToQueue(
-          actionType: 'UPDATE_PRODUCT',
-          data: updatedProduct.toJson(),
         );
       }
       

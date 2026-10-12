@@ -88,9 +88,10 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
   @override
   void initState() {
     super.initState();
-    // Force a fresh sync of transfers when the POS opens
+    // Force a fresh sync of transfers and products when the POS opens
     Future.microtask(() {
       ref.read(transferProvider.notifier).loadTransfers();
+      ref.read(productsFutureProvider.notifier).loadProducts();
     });
   }
 
@@ -530,7 +531,7 @@ class _CashierPOSState extends ConsumerState<CashierPOS> {
                     return ProductCard(
                       name: product.name,
                       category: mappedCat,
-                      price: isPriced ? '₵${currentPrice.toStringAsFixed(2)}/${product.unit}' : 'UNPRICED',
+                      price: isPriced ? '₵${currentPrice.toStringAsFixed(2)} / ${product.unit}' : 'UNPRICED',
                       originalPrice: hasPromo ? '₵${(isWholesale ? product.wholesalePrice : product.retailPrice).toStringAsFixed(2)}' : null,
                       stockQuantity: product.stockQuantity,
                       isUnlimited: product.isUnlimited,

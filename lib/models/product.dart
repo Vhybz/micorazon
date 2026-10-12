@@ -193,9 +193,19 @@ class Product {
   }
 
   factory Product.fromJson(dynamic json) {
-    final map = Map<String, dynamic>.from(json);
+    final map = Map<String, dynamic>.from(json as Map);
+    
+    PromoTarget safePromoTarget(String? target) {
+      if (target == null || target.isEmpty) return PromoTarget.both;
+      try {
+        return PromoTarget.values.byName(target.toLowerCase());
+      } catch (_) {
+        return PromoTarget.both;
+      }
+    }
+
     PromoCustomerTarget safeCustomerTarget(String? target) {
-      if (target == null) return PromoCustomerTarget.all;
+      if (target == null || target.isEmpty) return PromoCustomerTarget.all;
       try {
         return PromoCustomerTarget.values.byName(target);
       } catch (_) {
@@ -203,62 +213,76 @@ class Product {
       }
     }
 
+    DateTime? safeParseDate(dynamic val) {
+      if (val == null) return null;
+      try {
+        return DateTime.parse(val.toString());
+      } catch (_) {
+        return null;
+      }
+    }
+
     return Product(
-      id: map['id'] as String,
-      branchCode: map['branch_code'],
-      name: map['name'] as String,
-      retailPrice: (map['retail_price'] as num).toDouble(),
-      wholesalePrice: (map['wholesale_price'] as num).toDouble(),
-      costPrice: (map['cost_price'] as num? ?? 0).toDouble(),
+      id: map['id']?.toString() ?? '',
+      branchCode: map['branch_code']?.toString(),
+      name: map['name']?.toString() ?? 'Unnamed Product',
+      retailPrice: (map['retail_price'] as num? ?? 0.0).toDouble(),
+      wholesalePrice: (map['wholesale_price'] as num? ?? 0.0).toDouble(),
+      costPrice: (map['cost_price'] as num? ?? 0.0).toDouble(),
       retailBrackets: (map['retail_brackets'] as List?)
           ?.map((e) => PriceBracket.fromJson(e))
           .toList(),
       wholesaleBrackets: (map['wholesale_brackets'] as List?)
           ?.map((e) => PriceBracket.fromJson(e))
           .toList(),
-      imageUrl: map['image_url'] as String? ?? '',
-      category: map['category'] as String,
-      stockQuantity: (map['stock_quantity'] as num? ?? 0).toDouble(),
-      unit: map['unit'] as String? ?? 'kg',
+      imageUrl: map['image_url']?.toString() ?? '',
+      category: map['category']?.toString() ?? 'General',
+      stockQuantity: (map['stock_quantity'] as num? ?? 0.0).toDouble(),
+      unit: map['unit']?.toString() ?? 'kg',
       discountPercentage: (map['discount_percentage'] as num? ?? 0.0).toDouble(),
-      promoStartDate: map['promo_start'] != null ? DateTime.parse(map['promo_start']) : null,
-      promoEndDate: map['promo_end'] != null ? DateTime.parse(map['promo_end']) : null,
-      promoTarget: PromoTarget.values.byName(map['promo_target'] ?? 'both'),
-      promoCustomerTarget: safeCustomerTarget(map['promo_customer_target']),
+      promoStartDate: safeParseDate(map['promo_start']),
+      promoEndDate: safeParseDate(map['promo_end']),
+      promoTarget: safePromoTarget(map['promo_target']?.toString()),
+      promoCustomerTarget: safeCustomerTarget(map['promo_customer_target']?.toString()),
       targetCustomerId: map['target_customer_id']?.toString(),
-      isDeleted: map['is_deleted'] ?? false,
-      isUnlimited: map['is_unlimited'] ?? false,
+      isDeleted: map['is_deleted'] == true,
+      isUnlimited: map['is_unlimited'] == true,
       lowStockThreshold: (map['low_stock_threshold'] as num? ?? 5.0).toDouble(),
       dailyStockAdded: (map['daily_stock_added'] as num? ?? 0.0).toDouble(),
-      lastStockUpdate: map['last_stock_update'] != null ? DateTime.parse(map['last_stock_update']) : null,
+      lastStockUpdate: safeParseDate(map['last_stock_update']),
     );
   }
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'branch_code': branchCode,
-        'name': name,
-        'retail_price': retailPrice,
-        'wholesale_price': wholesalePrice,
-        'cost_price': costPrice,
-        'retail_brackets': retailBrackets?.map((e) => e.toJson()).toList(),
-        'wholesale_brackets': wholesaleBrackets?.map((e) => e.toJson()).toList(),
-        'image_url': imageUrl,
-        'category': category,
-        'stock_quantity': stockQuantity,
-        'unit': unit,
-        'discount_percentage': discountPercentage,
-        'promo_start': promoStartDate?.toIso8601String(),
-        'promo_end': promoEndDate?.toIso8601String(),
-        'promo_target': promoTarget.name,
-        'promo_customer_target': promoCustomerTarget.name,
-        'target_customer_id': targetCustomerId,
-        'is_deleted': isDeleted,
-        'is_unlimited': isUnlimited,
-        'low_stock_threshold': lowStockThreshold,
-        'daily_stock_added': dailyStockAdded,
-        'last_stock_update': lastStockUpdate?.toIso8601String(),
-      };
+  Map<String, dynamic> toJson() {
+    final map = <String, dynamic>{
+      'id': id,
+      'branch_code': branchCode,
+      'name': name,
+      'retail_price': retailPrice,
+      'wholesale_price': wholesalePrice,
+      'cost_price': costPrice,
+      'retail_brackets': retailBrackets?.map((e) => e.toJson()).toList(),
+      'wholesale_brackets': wholesaleBrackets?.map((e) => e.toJson()).toList(),
+      'image_url': imageUrl,
+      'category': category,
+      'stock_quantity': stockQuantity,
+      'unit': unit,
+      'discount_percentage': discountPercentage,
+      'promo_start': promoStartDate?.toIso8601String(),
+      'promo_end': promoEndDate?.toIso8601String(),
+      'promo_target': promoTarget.name,
+      'promo_customer_target': promoCustomerTarget.name,
+      'is_deleted': isDeleted,
+      'is_unlimited': isUnlimited,
+      'low_stock_threshold': lowStockThreshold,
+      'daily_stock_added': dailyStockAdded,
+      'last_stock_update': lastStockUpdate?.toIso8601String(),
+    };
+    if (targetCustomerId != null) {
+      map['target_customer_id'] = targetCustomerId;
+    }
+    return map;
+  }
 }
 
 class CartItem {

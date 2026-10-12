@@ -50,6 +50,37 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
     _startSubscription();
   }
 
+  List<ExpenseRecord> _mergeWithPendingQueue(List<ExpenseRecord> baseExpenses) {
+    try {
+      final Map<String, ExpenseRecord> map = {for (var e in baseExpenses) e.id: e};
+
+      final pendingUpdates = OfflineSyncService.getPendingItems('EXPENSE');
+      for (var json in pendingUpdates) {
+        try {
+          final e = ExpenseRecord.fromJson(json);
+          map[e.id] = e;
+        } catch (e) {
+          debugPrint('Error parsing pending expense: $e');
+        }
+      }
+
+      final pendingDeletes = OfflineSyncService.getPendingItems('DELETE_EXPENSE');
+      for (var json in pendingDeletes) {
+        final id = json['id']?.toString();
+        if (id != null) {
+          map.remove(id);
+        }
+      }
+
+      final list = map.values.toList();
+      list.sort((a, b) => b.date.compareTo(a.date));
+      return list;
+    } catch (e) {
+      debugPrint('Error merging pending expenses: $e');
+      return baseExpenses;
+    }
+  }
+
   void _loadFromCache() {
     try {
       final box = Hive.box(OfflineSyncService.expensesBoxName);
@@ -57,8 +88,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
         final List<ExpenseRecord> cached = box.values
             .map((json) => ExpenseRecord.fromJson(Map<String, dynamic>.from(json)))
             .toList();
-        state = state.copyWith(records: cached);
-        debugPrint('Expense Engine: ${cached.length} records loaded from local cache.');
+        final merged = _mergeWithPendingQueue(cached);
+        state = state.copyWith(records: merged);
+        debugPrint('Expense Engine: ${merged.length} records loaded from local cache.');
       }
     } catch (e) {
       debugPrint('Expense Engine Cache Error: $e');
@@ -83,8 +115,9 @@ class ExpenseNotifier extends StateNotifier<ExpenseState> {
 
     _subscription?.cancel();
     _subscription = _service.watchExpenses(user!.branchCode!).listen((expenses) {
-      state = state.copyWith(records: expenses);
-      _saveToCache(expenses);
+      final merged = _mergeWithPendingQueue(expenses);
+      state = state.copyWith(records: merged);
+      _saveToCache(merged);
     }, onError: (e) {
       debugPrint('Expense Stream Error: $e');
     });

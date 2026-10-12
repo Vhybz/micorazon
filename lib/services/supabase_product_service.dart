@@ -12,10 +12,25 @@ class SupabaseProductService implements ProductService {
     final response = await _client
         .from('products')
         .select()
-        .eq('branch_code', branchCode)
         .eq('is_deleted', false);
     
-    return (response as List).map((json) => Product.fromJson(json)).toList();
+    final List<Product> allProducts = [];
+    for (var json in (response as List)) {
+      try {
+        allProducts.add(Product.fromJson(json));
+      } catch (e) {
+        debugPrint('Error parsing product from REST: $e');
+      }
+    }
+
+    final cleanBranch = branchCode.trim().toLowerCase();
+    if (cleanBranch.isEmpty) return allProducts;
+
+    return allProducts.where((p) {
+      if (p.branchCode == null || p.branchCode!.trim().isEmpty) return true;
+      final pBranch = p.branchCode!.trim().toLowerCase();
+      return pBranch == cleanBranch || pBranch == 'hq' || cleanBranch == 'hq';
+    }).toList();
   }
 
   @override
@@ -29,17 +44,45 @@ class SupabaseProductService implements ProductService {
     return Product.fromJson(response);
   }
 
+  Map<String, dynamic> _cleanProductPayload(Map<String, dynamic> map, String error) {
+    final cleanMap = Map<String, dynamic>.from(map);
+    if (error.contains('PGRST204') || error.contains('target_customer_id')) {
+      cleanMap.remove('target_customer_id');
+    }
+    if (error.contains('23503') || error.contains('foreign key') || error.contains('products_branch_code_fkey')) {
+      cleanMap['branch_code'] = null;
+    }
+    return cleanMap;
+  }
+
   @override
   Future<void> addProduct(Product product) async {
-    await _client.from('products').insert(product.toJson());
+    final payload = product.toJson();
+    try {
+      await _client.from('products').insert(payload);
+    } catch (e) {
+      final err = e.toString();
+      final cleaned = _cleanProductPayload(payload, err);
+      await _client.from('products').insert(cleaned);
+    }
   }
 
   @override
   Future<void> updateProduct(Product product) async {
-    await _client
-        .from('products')
-        .update(product.toJson())
-        .eq('id', product.id);
+    final payload = product.toJson();
+    try {
+      await _client
+          .from('products')
+          .update(payload)
+          .eq('id', product.id);
+    } catch (e) {
+      final err = e.toString();
+      final cleaned = _cleanProductPayload(payload, err);
+      await _client
+          .from('products')
+          .update(cleaned)
+          .eq('id', product.id);
+    }
   }
 
   @override
@@ -108,10 +151,23 @@ class SupabaseProductService implements ProductService {
     return _client
         .from('products')
         .stream(primaryKey: ['id'])
-        .eq('branch_code', branchCode)
-        .map((data) => data
-            .map((json) => Product.fromJson(json))
-            .where((p) => !p.isDeleted)
-            .toList());
+        .map((data) {
+          final cleanBranch = branchCode.trim().toLowerCase();
+          final List<Product> list = [];
+          for (var json in data) {
+            try {
+              list.add(Product.fromJson(json));
+            } catch (e) {
+              debugPrint('Error parsing product in stream: $e');
+            }
+          }
+          return list.where((p) {
+            if (p.isDeleted) return false;
+            if (cleanBranch.isEmpty) return true;
+            if (p.branchCode == null || p.branchCode!.trim().isEmpty) return true;
+            final pBranch = p.branchCode!.trim().toLowerCase();
+            return pBranch == cleanBranch || pBranch == 'hq' || cleanBranch == 'hq';
+          }).toList();
+        });
   }
 }

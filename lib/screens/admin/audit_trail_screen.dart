@@ -116,56 +116,80 @@ class _AuditTrailScreenState extends ConsumerState<AuditTrailScreen> {
         color: theme.cardTheme.color,
         border: Border(bottom: BorderSide(color: theme.dividerColor)),
       ),
-      child: Wrap(
-        spacing: AppSpacing.m,
-        runSpacing: AppSpacing.m,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          SizedBox(
-            width: 250,
-            child: TextField(
-              onChanged: (v) => setState(() => _searchQuery = v),
-              decoration: InputDecoration(
-                hintText: 'Search actions or staff...',
-                prefixIcon: const Icon(Icons.search),
-                isDense: true,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final isMobile = constraints.maxWidth < 600;
+          final inputWidth = isMobile ? constraints.maxWidth : 220.0;
+
+          return Wrap(
+            spacing: AppSpacing.m,
+            runSpacing: AppSpacing.m,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: inputWidth,
+                child: TextField(
+                  onChanged: (v) => setState(() => _searchQuery = v),
+                  decoration: InputDecoration(
+                    hintText: 'Search actions or staff...',
+                    prefixIcon: const Icon(Icons.search),
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                  ),
+                ),
               ),
-            ),
-          ),
-          SizedBox(
-            width: 200,
-            child: DropdownButtonFormField<String>(
-              initialValue: _selectedAction,
-              decoration: const InputDecoration(labelText: 'Action Type', isDense: true, border: OutlineInputBorder()),
-              items: [
-                const DropdownMenuItem(value: null, child: Text('All Actions')),
-                ...['SALE_CREATED', 'SALE_REVERSED', 'STOCK_ADJUSTED', 'PRODUCT_UPDATED', 'USER_PROMOTED', 'CEO_WITHDRAWAL', 'WITHDRAWAL_EDITED', 'WITHDRAWAL_DELETED', 'USER_SIGNED_IN', 'USER_SIGNED_OUT']
-                    .map((a) => DropdownMenuItem(value: a, child: Text(a.replaceAll('_', ' ')))),
-              ],
-              onChanged: (v) => setState(() => _selectedAction = v),
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed: _showDateFilterOptions,
-            icon: const Icon(Icons.date_range),
-            label: Text(_startDate == null 
-              ? 'Filter Date' 
-              : _startDate!.day == _endDate!.day && _startDate!.month == _endDate!.month && _startDate!.year == _endDate!.year
-                ? DateFormat('MM/dd').format(_startDate!)
-                : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}'),
-          ),
-          if (_startDate != null || _selectedAction != null || _searchQuery.isNotEmpty)
-            IconButton(
-              onPressed: () => setState(() {
-                _startDate = null;
-                _endDate = null;
-                _selectedAction = null;
-                _searchQuery = '';
-              }),
-              icon: const Icon(Icons.clear_all),
-            ),
-        ],
+              SizedBox(
+                width: inputWidth,
+                child: DropdownButtonFormField<String>(
+                  initialValue: _selectedAction,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Action Type', 
+                    isDense: true, 
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    const DropdownMenuItem(
+                      value: null, 
+                      child: Text('All Actions', overflow: TextOverflow.ellipsis),
+                    ),
+                    ...['SALE_CREATED', 'SALE_REVERSED', 'STOCK_ADJUSTED', 'PRODUCT_UPDATED', 'USER_PROMOTED', 'CEO_WITHDRAWAL', 'WITHDRAWAL_EDITED', 'WITHDRAWAL_DELETED', 'USER_SIGNED_IN', 'USER_SIGNED_OUT']
+                        .map((a) => DropdownMenuItem(
+                          value: a, 
+                          child: Text(a.replaceAll('_', ' '), overflow: TextOverflow.ellipsis),
+                        )),
+                  ],
+                  onChanged: (v) => setState(() => _selectedAction = v),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _showDateFilterOptions,
+                icon: const Icon(Icons.date_range),
+                label: Text(
+                  _startDate == null 
+                    ? 'Filter Date' 
+                    : _startDate!.day == _endDate!.day && _startDate!.month == _endDate!.month && _startDate!.year == _endDate!.year
+                      ? DateFormat('MM/dd').format(_startDate!)
+                      : '${DateFormat('MM/dd').format(_startDate!)} - ${DateFormat('MM/dd').format(_endDate!)}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_startDate != null || _selectedAction != null || _searchQuery.isNotEmpty)
+                IconButton(
+                  onPressed: () => setState(() {
+                    _startDate = null;
+                    _endDate = null;
+                    _selectedAction = null;
+                    _searchQuery = '';
+                  }),
+                  icon: const Icon(Icons.clear_all),
+                  tooltip: 'Clear Filters',
+                ),
+            ],
+          );
+        },
       ),
     );
   }

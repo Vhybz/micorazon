@@ -155,7 +155,9 @@ class ProductCard extends StatelessWidget {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
-                          isUnlimited ? 'UNLIMITED' : '${stockQuantity!.toStringAsFixed(1)}${unit ?? "kg"}',
+                          isUnlimited 
+                            ? 'UNLIMITED' 
+                            : '${stockQuantity!.toStringAsFixed((unit == "unit" || unit == "pcs") ? 0 : 1)} ${unit ?? "kg"}',
                           style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
                         ),
                       ),

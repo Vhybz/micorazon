@@ -41,6 +41,37 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
     _initStream();
   }
 
+  List<SaleRecord> _mergeWithPendingQueue(List<SaleRecord> baseSales) {
+    try {
+      final Map<String, SaleRecord> map = {for (var s in baseSales) s.id: s};
+
+      final pendingUpdates = OfflineSyncService.getPendingItems('SALE');
+      for (var json in pendingUpdates) {
+        try {
+          final s = SaleRecord.fromJson(json);
+          map[s.id] = s;
+        } catch (e) {
+          debugPrint('Error parsing pending sale: $e');
+        }
+      }
+
+      final pendingDeletes = OfflineSyncService.getPendingItems('DELETE_SALE');
+      for (var json in pendingDeletes) {
+        final id = json['id']?.toString();
+        if (id != null) {
+          map.remove(id);
+        }
+      }
+
+      final list = map.values.toList();
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return list;
+    } catch (e) {
+      debugPrint('Error merging pending sales: $e');
+      return baseSales;
+    }
+  }
+
   void _loadFromCache() {
     try {
       final box = Hive.box(OfflineSyncService.salesBoxName);
@@ -48,8 +79,8 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
         final List<SaleRecord> cached = box.values
             .map((json) => SaleRecord.fromJson(Map<String, dynamic>.from(json)))
             .toList();
-        state = cached;
-        debugPrint('Sale Engine: ${cached.length} records loaded from local cache.');
+        state = _mergeWithPendingQueue(cached);
+        debugPrint('Sale Engine: ${state.length} records loaded from local cache.');
       }
     } catch (e) {
       debugPrint('Sale Engine Cache Error: $e');
@@ -76,8 +107,9 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
 
     _subscription?.cancel();
     _subscription = _service.getSalesStream(user!.branchCode!).listen((sales) {
-      state = sales;
-      _saveToCache(sales);
+      final merged = _mergeWithPendingQueue(sales);
+      state = merged;
+      _saveToCache(merged);
     }, onError: (e) {
       debugPrint('Sale Stream Error (Offline?): Using cached data.');
     });
@@ -96,6 +128,15 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
   Future<void> addSale(SaleRecord sale) async {
     final user = ref.read(currentUserProvider);
     final saleWithBranch = sale.copyWith(branchCode: user?.branchCode);
+
+    // Optimistic local state update
+    final existingIndex = state.indexWhere((s) => s.id == saleWithBranch.id);
+    if (existingIndex >= 0) {
+      state = [for (final s in state) if (s.id == saleWithBranch.id) saleWithBranch else s];
+    } else {
+      state = [saleWithBranch, ...state];
+    }
+    _saveToCache(state);
 
     try {
       // 1. Audit Log (Source of truth tracking)
@@ -120,8 +161,6 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
         actionType: 'SALE', 
         data: saleWithBranch.toJson(),
       );
-      // Optimistic local update
-      state = [saleWithBranch, ...state];
     }
 
     // 4. Auto-Register Debtor as Customer if missing

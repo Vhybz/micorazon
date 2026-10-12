@@ -32,6 +32,35 @@ class CustomerNotifier extends StateNotifier<List<Customer>> {
     _startSubscription();
   }
 
+  List<Customer> _mergeWithPendingQueue(List<Customer> baseCustomers) {
+    try {
+      final Map<String, Customer> map = {for (var c in baseCustomers) c.id: c};
+
+      final pendingUpdates = OfflineSyncService.getPendingItems('CUSTOMER');
+      for (var json in pendingUpdates) {
+        try {
+          final c = Customer.fromJson(json);
+          map[c.id] = c;
+        } catch (e) {
+          debugPrint('Error parsing pending customer: $e');
+        }
+      }
+
+      final pendingDeletes = OfflineSyncService.getPendingItems('DELETE_CUSTOMER');
+      for (var json in pendingDeletes) {
+        final id = json['id']?.toString();
+        if (id != null) {
+          map.remove(id);
+        }
+      }
+
+      return map.values.toList();
+    } catch (e) {
+      debugPrint('Error merging pending customers: $e');
+      return baseCustomers;
+    }
+  }
+
   void _loadFromCache() {
     try {
       final box = Hive.box(OfflineSyncService.customersBoxName);
@@ -39,8 +68,8 @@ class CustomerNotifier extends StateNotifier<List<Customer>> {
         final List<Customer> cached = box.values
             .map((json) => Customer.fromJson(Map<String, dynamic>.from(json)))
             .toList();
-        state = cached;
-        debugPrint('Customer Engine: ${cached.length} customers loaded from local cache.');
+        state = _mergeWithPendingQueue(cached);
+        debugPrint('Customer Engine: ${state.length} customers loaded from local cache.');
       }
     } catch (e) {
       debugPrint('Customer Engine Cache Error: $e');
@@ -65,8 +94,9 @@ class CustomerNotifier extends StateNotifier<List<Customer>> {
     final branchCode = user?.branchCode ?? '';
 
     _subscription = _service.watchCustomers(branchCode).listen((customers) {
-      state = customers;
-      _saveToCache(customers);
+      final merged = _mergeWithPendingQueue(customers);
+      state = merged;
+      _saveToCache(merged);
     }, onError: (e) {
       debugPrint('Customer Stream Error: $e');
     });

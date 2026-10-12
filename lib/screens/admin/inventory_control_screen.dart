@@ -1293,6 +1293,12 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     String selectedCategory = categories.contains(normalized) ? normalized : 'Other';
     bool isUnlimited = product.isUnlimited;
 
+    final availableUnits = ['kg', 'lb', 'g', 'unit', 'pcs', 'pack', 'box', 'bag'];
+    String selectedUnit = product.unit.isEmpty ? 'kg' : product.unit.toLowerCase();
+    if (!availableUnits.contains(selectedUnit)) {
+      availableUnits.add(selectedUnit);
+    }
+
     if (selectedCategory == 'Other') {
       otherCategoryController.text = product.category;
     }
@@ -1437,6 +1443,16 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                     ],
                   ),
                   const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedUnit,
+                    decoration: const InputDecoration(labelText: 'Pricing Unit (e.g. /kg, /lb, /pcs, /unit)'),
+                    items: availableUnits.map((u) => DropdownMenuItem(
+                      value: u, 
+                      child: Text(u == 'unit' ? 'unit (Per Unit)' : (u == 'pcs' ? 'pcs (Pieces)' : u)),
+                    )).toList(),
+                    onChanged: (v) => setState(() => selectedUnit = v!),
+                  ),
+                  const SizedBox(height: 16),
                   SwitchListTile(
                     title: const Text('Unlimited Stock', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                     subtitle: const Text('Sales will not subtract from quantity', style: TextStyle(fontSize: 11)),
@@ -1480,6 +1496,7 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
                     category: selectedCategory == 'Other' ? otherCategoryController.text : selectedCategory,
                     imageUrl: finalImageUrl,
                     isUnlimited: isUnlimited,
+                    unit: selectedUnit,
                   );
                   await ref.read(productsFutureProvider.notifier).updateProduct(updated);
                   if (context.mounted) Navigator.pop(context);
@@ -1992,151 +2009,176 @@ class _InventoryControlScreenState extends ConsumerState<InventoryControlScreen>
     final formKey = GlobalKey<FormState>();
     final stockController = TextEditingController();
     final theme = Theme.of(context);
-    WeightUnit selectedUnit = WeightUnit.values.firstWhere((u) => u.name == product.unit, orElse: () => WeightUnit.kg);
+    
+    // Parse current product unit
+    WeightUnit selectedUnit;
+    final lowerUnit = product.unit.toLowerCase().trim();
+    if (lowerUnit == 'pcs' || lowerUnit == 'unit') {
+      selectedUnit = WeightUnit.unit;
+    } else if (lowerUnit == 'lb') {
+      selectedUnit = WeightUnit.lb;
+    } else if (lowerUnit == 'g') {
+      selectedUnit = WeightUnit.g;
+    } else {
+      selectedUnit = WeightUnit.kg;
+    }
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          scrollable: true,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
-          title: Row(
-            children: [
-              const Icon(Icons.edit_note, color: AppColors.primaryMaroon),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text('Update Stock: ${product.name}', 
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                  overflow: TextOverflow.ellipsis
-                ),
-              ),
-            ],
-          ),
-          content: Form(
-            key: formKey,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.m),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(AppRadius.s),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.inventory_2, color: theme.colorScheme.primary),
-                        const SizedBox(width: AppSpacing.m),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Current Inventory', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: Text(WeightConverter.formatShort(product.stockQuantity, unit: product.unit), 
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: theme.colorScheme.primary)),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+        builder: (context, setState) {
+          final String displayUnitLabel = selectedUnit == WeightUnit.unit ? 'pcs' : selectedUnit.name;
+          double displayStockQty = product.stockQuantity;
+          if (selectedUnit == WeightUnit.lb) {
+            displayStockQty = WeightConverter.toLb(product.stockQuantity);
+          } else if (selectedUnit == WeightUnit.g) {
+            displayStockQty = WeightConverter.toG(product.stockQuantity);
+          }
+          final String displayStockText = '${displayStockQty.toStringAsFixed(selectedUnit == WeightUnit.unit ? 0 : 1)} $displayUnitLabel';
+
+          return AlertDialog(
+            scrollable: true,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+            title: Row(
+              children: [
+                const Icon(Icons.edit_note, color: AppColors.primaryMaroon),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text('Update Stock: ${product.name}', 
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                    overflow: TextOverflow.ellipsis
                   ),
-                  const SizedBox(height: AppSpacing.l),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: stockController,
-                          decoration: InputDecoration(
-                            labelText: selectedUnit == WeightUnit.unit ? 'Add/Remove Qty' : 'Add/Remove (${selectedUnit.name})',
-                            hintText: 'e.g. 50.0 or -10.5',
-                            helperText: 'Use negative to reduce',
-                            border: const OutlineInputBorder(),
-                          ),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]'))],
-                          autofocus: true,
-                          validator: (v) {
-                            if (v == null || v.isEmpty) return 'Required';
-                            if (double.tryParse(v) == null) return 'Invalid';
-                            return null;
-                          },
-                        ),
+                ),
+              ],
+            ),
+            content: Form(
+              key: formKey,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 400),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.m),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(AppRadius.s),
                       ),
-                      const SizedBox(width: 8),
-                      Column(
+                      child: Row(
                         children: [
-                          const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
-                          ToggleButtons(
-                            constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
-                            isSelected: [
-                              selectedUnit == WeightUnit.kg, 
-                              selectedUnit == WeightUnit.g,
-                              selectedUnit == WeightUnit.lb,
-                              selectedUnit == WeightUnit.unit,
-                            ],
-                            onPressed: (index) {
-                              setState(() {
-                                selectedUnit = WeightUnit.values[index];
-                              });
-                            },
-                            borderRadius: BorderRadius.circular(8),
-                            selectedColor: Colors.white,
-                            fillColor: theme.colorScheme.primary,
-                            children: const [
-                              Text('kg', style: TextStyle(fontSize: 9)),
-                              Text('g', style: TextStyle(fontSize: 9)),
-                              Text('lb', style: TextStyle(fontSize: 9)),
-                              Text('pcs', style: TextStyle(fontSize: 9)),
-                            ],
+                          Icon(Icons.inventory_2, color: theme.colorScheme.primary),
+                          const SizedBox(width: AppSpacing.m),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Current Inventory', style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant, fontWeight: FontWeight.bold)),
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(displayStockText, 
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: theme.colorScheme.primary)),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: AppSpacing.l),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: stockController,
+                            decoration: InputDecoration(
+                              labelText: selectedUnit == WeightUnit.unit ? 'Add/Remove Qty' : 'Add/Remove (${selectedUnit.name})',
+                              hintText: 'e.g. 50.0 or -10.5',
+                              helperText: 'Use negative to reduce',
+                              border: const OutlineInputBorder(),
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]'))],
+                            autofocus: true,
+                            validator: (v) {
+                              if (v == null || v.isEmpty) return 'Required';
+                              if (double.tryParse(v) == null) return 'Invalid';
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          children: [
+                            const Text('UNIT', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold)),
+                            ToggleButtons(
+                              constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+                              isSelected: [
+                                selectedUnit == WeightUnit.kg, 
+                                selectedUnit == WeightUnit.g,
+                                selectedUnit == WeightUnit.lb,
+                                selectedUnit == WeightUnit.unit,
+                              ],
+                              onPressed: (index) {
+                                setState(() {
+                                  selectedUnit = WeightUnit.values[index];
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              selectedColor: Colors.white,
+                              fillColor: theme.colorScheme.primary,
+                              children: const [
+                                Text('kg', style: TextStyle(fontSize: 9)),
+                                Text('g', style: TextStyle(fontSize: 9)),
+                                Text('lb', style: TextStyle(fontSize: 9)),
+                                Text('pcs', style: TextStyle(fontSize: 9)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  double change = double.tryParse(stockController.text) ?? 0.0;
-                  if (change != 0) {
-                    // Normalize to master unit (kg or unit)
-                    if (product.unit == 'unit') {
-                      // If master is unit, we just add the absolute value
-                      ref.read(productsFutureProvider.notifier).updateStock(product.id, change);
-                    } else {
-                      // If master is weight (kg), we convert from selected unit to kg
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel', style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  if (formKey.currentState!.validate()) {
+                    double change = double.tryParse(stockController.text) ?? 0.0;
+                    final newUnitStr = selectedUnit == WeightUnit.unit ? 'pcs' : selectedUnit.name;
+
+                    // Update product unit if it was changed in the unit toggle bar
+                    if (product.unit.toLowerCase().trim() != newUnitStr.toLowerCase().trim()) {
+                      final updatedProduct = product.copyWith(unit: newUnitStr);
+                      await ref.read(productsFutureProvider.notifier).updateProduct(updatedProduct);
+                    }
+
+                    if (change != 0) {
                       if (selectedUnit == WeightUnit.g) change = WeightConverter.fromG(change);
                       if (selectedUnit == WeightUnit.lb) change = WeightConverter.toKg(change);
-                      ref.read(productsFutureProvider.notifier).updateStock(product.id, change);
+                      await ref.read(productsFutureProvider.notifier).updateStock(product.id, change);
                     }
-                    Navigator.pop(context);
+
+                    if (context.mounted) Navigator.pop(context);
                   }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: theme.colorScheme.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.s)),
+                ),
+                child: const Text('Update'),
               ),
-              child: const Text('Update'),
-            ),
-          ],
-        ),
+            ],
+          );
+        },
       ),
     );
   }

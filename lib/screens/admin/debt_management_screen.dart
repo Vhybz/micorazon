@@ -574,6 +574,8 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
   void _showCollectionDialog(BuildContext context, SaleRecord sale) {
     final theme = Theme.of(context);
     final amountController = TextEditingController();
+    final refController = TextEditingController();
+    PaymentMethod selectedMethod = PaymentMethod.cash;
     bool isSaving = false;
     final isPaid = sale.balance <= 0.01;
 
@@ -585,7 +587,7 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
           contentPadding: EdgeInsets.zero,
           content: Container(
-            width: 450,
+            width: 480,
             color: theme.colorScheme.surface,
             child: SingleChildScrollView(
               child: Column(
@@ -674,27 +676,108 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
                           const SizedBox(height: AppSpacing.l),
                           Text('RECORD NEW PAYMENT', style: theme.textTheme.labelSmall?.copyWith(letterSpacing: 1.2, fontWeight: FontWeight.bold, color: theme.colorScheme.primary)),
                           const SizedBox(height: AppSpacing.s),
+                          
+                          // Payment Method Selector
+                          Text('Payment Method', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: theme.colorScheme.onSurfaceVariant)),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              _buildMethodChoiceChip(
+                                label: 'Cash',
+                                icon: Icons.payments_outlined,
+                                method: PaymentMethod.cash,
+                                selectedMethod: selectedMethod,
+                                color: Colors.green,
+                                theme: theme,
+                                onSelect: () => setState(() => selectedMethod = PaymentMethod.cash),
+                              ),
+                              const SizedBox(width: 8),
+                              _buildMethodChoiceChip(
+                                label: 'MoMo',
+                                icon: Icons.smartphone,
+                                method: PaymentMethod.mobileMoney,
+                                selectedMethod: selectedMethod,
+                                color: Colors.orange,
+                                theme: theme,
+                                onSelect: () => setState(() => selectedMethod = PaymentMethod.mobileMoney),
+                              ),
+                              const SizedBox(width: 8),
+                              _buildMethodChoiceChip(
+                                label: 'Bank',
+                                icon: Icons.account_balance,
+                                method: PaymentMethod.bankDeposit,
+                                selectedMethod: selectedMethod,
+                                color: Colors.purple,
+                                theme: theme,
+                                onSelect: () => setState(() => selectedMethod = PaymentMethod.bankDeposit),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.m),
+
+                          // Amount Field with Quick Full Balance Button
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: amountController,
+                                  autofocus: true,
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^[0-9.,]*$'))],
+                                  decoration: InputDecoration(
+                                    hintText: 'Enter amount...',
+                                    prefixIcon: const Icon(Icons.add_card),
+                                    prefixText: '₵ ',
+                                    filled: true,
+                                    fillColor: theme.colorScheme.primary.withValues(alpha: 0.05),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppRadius.m),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(AppRadius.m),
+                                      borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
+                                    ),
+                                  ),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  amountController.text = sale.balance.toStringAsFixed(2);
+                                },
+                                icon: const Icon(Icons.done_all, size: 16),
+                                label: const Text('Full Bal', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: OutlinedButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 16),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: AppSpacing.s),
+
+                          // Reference / Transaction ID Input
                           TextField(
-                            controller: amountController,
-                            autofocus: true,
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^[0-9.,]*$'))],
+                            controller: refController,
+                            style: const TextStyle(fontSize: 13),
                             decoration: InputDecoration(
-                              hintText: 'Enter amount...',
-                              prefixIcon: const Icon(Icons.add_card),
-                              prefixText: '₵ ',
-                              filled: true,
-                              fillColor: theme.colorScheme.primary.withValues(alpha: 0.05),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(AppRadius.m),
-                                borderSide: BorderSide.none,
+                              hintText: selectedMethod == PaymentMethod.mobileMoney
+                                  ? 'MoMo Ref / Txn ID / Sender Phone (Optional)'
+                                  : (selectedMethod == PaymentMethod.bankDeposit
+                                      ? 'Deposit Slip # / Bank Ref (Optional)'
+                                      : 'Receipt / Notes (Optional)'),
+                              prefixIcon: Icon(
+                                selectedMethod == PaymentMethod.mobileMoney
+                                    ? Icons.receipt_long
+                                    : (selectedMethod == PaymentMethod.bankDeposit ? Icons.tag : Icons.note_alt_outlined),
+                                size: 18,
                               ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(AppRadius.m),
-                                borderSide: BorderSide(color: theme.colorScheme.primary, width: 2),
-                              ),
+                              isDense: true,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadius.m)),
                             ),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           ),
                         ],
 
@@ -707,31 +790,70 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
                             child: Text('No payments recorded.', style: TextStyle(fontStyle: FontStyle.italic, fontSize: 12)),
                           )
                         else
-                          ...sale.payments.map((p) => Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surface,
-                              border: Border.all(color: theme.colorScheme.outlineVariant),
-                              borderRadius: BorderRadius.circular(AppRadius.s),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.history, size: 16, color: theme.colorScheme.onSurfaceVariant),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(p.method.name.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                                      Text(p.reference ?? "Direct Payment", style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
-                                    ],
+                          ...sale.payments.map((p) {
+                            final isCash = p.method == PaymentMethod.cash;
+                            final isMomo = p.method == PaymentMethod.mobileMoney;
+                            final methodColor = isCash 
+                                ? Colors.green 
+                                : (isMomo ? Colors.orange : Colors.purple);
+                            final methodIcon = isCash 
+                                ? Icons.payments_outlined 
+                                : (isMomo ? Icons.smartphone : Icons.account_balance);
+                            final methodText = isCash 
+                                ? 'CASH' 
+                                : (isMomo ? 'MOMO' : 'BANK DEPOSIT');
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surface,
+                                border: Border.all(color: theme.colorScheme.outlineVariant),
+                                borderRadius: BorderRadius.circular(AppRadius.s),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(6),
+                                    decoration: BoxDecoration(
+                                      color: methodColor.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Icon(methodIcon, size: 16, color: methodColor),
                                   ),
-                                ),
-                                Text('₵${p.amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              ],
-                            ),
-                          )),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Text(
+                                              methodText, 
+                                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: methodColor),
+                                            ),
+                                            if (p.date != null) ...[
+                                              const SizedBox(width: 6),
+                                              Text(
+                                                '• ${DateFormat('MMM dd, HH:mm').format(p.date!)}',
+                                                style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          p.reference ?? "Direct Payment", 
+                                          style: TextStyle(fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Text('₵${p.amount.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                ],
+                              ),
+                            );
+                          }),
                       ],
                     ),
                   ),
@@ -759,10 +881,18 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
                   
                   try {
                     final paymentDate = DateTime.now();
+                    final methodTag = selectedMethod == PaymentMethod.mobileMoney
+                        ? 'MoMo'
+                        : (selectedMethod == PaymentMethod.bankDeposit ? 'Bank' : 'Cash');
+                    final userRef = refController.text.trim();
+                    final String referenceStr = userRef.isNotEmpty
+                        ? 'Manual Collection ($methodTag) - $userRef'
+                        : 'Manual Collection ($methodTag) ${DateFormat('yyMMdd').format(paymentDate)}';
+
                     final newPayment = PaymentDetail(
-                      method: PaymentMethod.cash, 
+                      method: selectedMethod, 
                       amount: amount,
-                      reference: 'Manual Collection ${DateFormat('yyMMdd').format(paymentDate)}',
+                      reference: referenceStr,
                       date: paymentDate,
                     );
                     
@@ -783,6 +913,7 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
                         invoiceId: sale.id,
                         amountPaid: amount,
                         remainingBalance: updatedSale.balance,
+                        paymentMethod: selectedMethod,
                         branchName: branchName,
                       );
                     }
@@ -801,15 +932,19 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
                       amountPaid: amount,
                       remainingBalance: updatedSale.balance,
                       paymentTime: paymentDate,
+                      paymentMethod: selectedMethod,
                       branchName: branchName,
                       extraAdminPhones: adminPhones,
                     );
                     
                     if (context.mounted) {
                       Navigator.pop(context);
+                      final methodLabel = selectedMethod == PaymentMethod.mobileMoney
+                          ? 'MoMo'
+                          : (selectedMethod == PaymentMethod.bankDeposit ? 'Bank Deposit' : 'Cash');
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('Payment of ₵${amount.toStringAsFixed(2)} recorded! SMS alert sent to Admin.'), 
+                          content: Text('Payment of ₵${amount.toStringAsFixed(2)} ($methodLabel) recorded! SMS alert sent.'), 
                           backgroundColor: Colors.green,
                           behavior: SnackBarBehavior.floating,
                         ),
@@ -835,6 +970,54 @@ class _DebtManagementScreenState extends ConsumerState<DebtManagementScreen> {
                   : const Text('Record Payment'),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMethodChoiceChip({
+    required String label,
+    required IconData icon,
+    required PaymentMethod method,
+    required PaymentMethod selectedMethod,
+    required Color color,
+    required ThemeData theme,
+    required VoidCallback onSelect,
+  }) {
+    final isSelected = selectedMethod == method;
+    return Expanded(
+      child: InkWell(
+        onTap: onSelect,
+        borderRadius: BorderRadius.circular(AppRadius.m),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? color.withValues(alpha: 0.15) : theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(AppRadius.m),
+            border: Border.all(
+              color: isSelected ? color : theme.colorScheme.outlineVariant,
+              width: isSelected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 16, color: isSelected ? color : theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? color : theme.colorScheme.onSurface,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

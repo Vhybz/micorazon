@@ -253,11 +253,15 @@ class SmsService {
     required String invoiceId,
     required double amountPaid,
     required double remainingBalance,
+    PaymentMethod paymentMethod = PaymentMethod.cash,
     String? branchName,
   }) async {
     if (phone.isEmpty) return false;
     final String shopName = branchName ?? 'Mi~Corazon Butchery';
-    String message = 'Hello $name, we have received your payment of GHS ${amountPaid.toStringAsFixed(2)} for invoice $invoiceId at $shopName.';
+    final String methodStr = paymentMethod == PaymentMethod.mobileMoney
+        ? ' (MoMo)'
+        : (paymentMethod == PaymentMethod.bankDeposit ? ' (Bank)' : ' (Cash)');
+    String message = 'Hello $name, we have received your payment of GHS ${amountPaid.toStringAsFixed(2)}$methodStr for invoice $invoiceId at $shopName.';
     if (remainingBalance > 0.01) {
       message += ' Your remaining balance is GHS ${remainingBalance.toStringAsFixed(2)}.';
     } else {
@@ -273,6 +277,7 @@ class SmsService {
     required double amountPaid,
     required double remainingBalance,
     required DateTime paymentTime,
+    PaymentMethod paymentMethod = PaymentMethod.cash,
     String? branchName,
     List<String>? extraAdminPhones,
   }) async {
@@ -288,14 +293,23 @@ class SmsService {
     
     final String timeStr = DateFormat('MMM dd, yyyy HH:mm').format(paymentTime);
 
+    final String methodLabel = paymentMethod == PaymentMethod.mobileMoney
+        ? 'MoMo (Mobile Money)'
+        : (paymentMethod == PaymentMethod.bankDeposit ? 'Bank Deposit' : 'Cash');
+
+    final String noteText = paymentMethod == PaymentMethod.cash
+        ? 'NOTE: This GHS ${amountPaid.toStringAsFixed(2)} cash is added to today\'s shop physical cash (till).'
+        : 'NOTE: Payment received via $methodLabel.';
+
     final String message = 
         'DEBT PAYMENT ALERT - $shopName\n'
         '• Customer: $customerName ($customerPhone)\n'
         '• Invoice: #$cleanInvoice\n'
         '• Amount Paid: GHS ${amountPaid.toStringAsFixed(2)}\n'
+        '• Method: $methodLabel\n'
         '• Status: $statusText\n'
         '• Time: $timeStr\n'
-        'NOTE: This GHS ${amountPaid.toStringAsFixed(2)} cash is added to today\'s shop cash (till). Total cash at shop will be higher than today\'s direct sales by this amount.';
+        '$noteText';
 
     final Set<String> targetPhones = {_adminPhone};
     if (extraAdminPhones != null) {
