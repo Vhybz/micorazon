@@ -62,6 +62,10 @@ CREATE TABLE public.users (
   salary_day INT,
   last_salary_date DATE,
   last_payment_was_advance BOOLEAN DEFAULT false,
+  total_salary_paid DECIMAL(10,2) DEFAULT 0.0,
+  total_advances_taken DECIMAL(10,2) DEFAULT 0.0,
+  total_loans_taken DECIMAL(10,2) DEFAULT 0.0,
+  total_loans_repaid DECIMAL(10,2) DEFAULT 0.0,
   theme_mode TEXT DEFAULT 'system',
   theme_primary_color BIGINT
 );
@@ -265,13 +269,16 @@ CREATE TABLE public.customers (
   created_at TIMESTAMPTZ DEFAULT now() NOT NULL
 );
 
--- STAFF PAYMENTS AUDIT (Payroll History)
+-- STAFF PAYMENTS AUDIT (Payroll & Loan History)
 CREATE TABLE public.staff_payments_audit (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id TEXT NOT NULL, -- TEXT for maximum ID compatibility
   amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
   is_advance BOOLEAN NOT NULL DEFAULT false,
+  is_loan BOOLEAN NOT NULL DEFAULT false,
+  is_loan_repayment BOOLEAN NOT NULL DEFAULT false,
   date TIMESTAMPTZ NOT NULL DEFAULT now(),
+  target_month TIMESTAMPTZ,
   note TEXT
 );
 
@@ -410,17 +417,27 @@ GRANT ALL ON FUNCTION public.increment_stock TO anon, authenticated, service_rol
 
 NOTIFY pgrst, 'reload schema';
 ```
--- 1. Add range label to slaughter logs for tracking
-ALTER TABLE public.slaughter_logs
-ADD COLUMN IF NOT EXISTS chicken_range_label TEXT;
 
--- 2. Create Atomic Increment Function for Inventory
--- This prevents stock errors when multiple users are selling/updating at once
-CREATE OR REPLACE FUNCTION increment_stock(p_id UUID, p_amount NUMERIC)
-RETURNS VOID AS $$
-BEGIN
-UPDATE public.products
-SET stock_quantity = stock_quantity + p_amount
-WHERE id = p_id;
-END;
-$$ LANGUAGE plpgsql;
+-- =====================================================
+-- 11. SAFE NON-DESTRUCTIVE UPDATE SCRIPT (Run on Existing DB)
+-- =====================================================
+
+-- Add missing columns to Users
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS total_salary_paid DECIMAL(10,2) DEFAULT 0.0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS total_advances_taken DECIMAL(10,2) DEFAULT 0.0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS total_loans_taken DECIMAL(10,2) DEFAULT 0.0;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS total_loans_repaid DECIMAL(10,2) DEFAULT 0.0;
+
+-- Add missing columns to Products
+ALTER TABLE public.products ADD COLUMN IF NOT EXISTS target_customer_id TEXT;
+
+-- Add missing columns to Staff Payments Audit
+ALTER TABLE public.staff_payments_audit ADD COLUMN IF NOT EXISTS is_loan BOOLEAN DEFAULT false;
+ALTER TABLE public.staff_payments_audit ADD COLUMN IF NOT EXISTS is_loan_repayment BOOLEAN DEFAULT false;
+ALTER TABLE public.staff_payments_audit ADD COLUMN IF NOT EXISTS target_month TIMESTAMPTZ;
+
+-- Add missing columns to Slaughter Logs
+ALTER TABLE public.slaughter_logs ADD COLUMN IF NOT EXISTS chicken_range_label TEXT;
+
+-- Reload Schema Cache
+NOTIFY pgrst, 'reload schema';

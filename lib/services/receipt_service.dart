@@ -696,7 +696,7 @@ static String _generateQRData(SaleRecord sale) {
                   ],
                 ),
               ),
-              pw.Text('STAFF PAYROLL & SALARY REPORT', style: pw.TextStyle(fontSize: 18, font: boldFont)),
+              pw.Text('STAFF PAYROLL, LOANS & ADVANCES REPORT', style: pw.TextStyle(fontSize: 16, font: boldFont)),
               pw.SizedBox(height: 20),
               
               pw.Table(
@@ -707,28 +707,21 @@ static String _generateQRData(SaleRecord sale) {
                     children: [
                       _tableHeader('Staff Name', boldFont),
                       _tableHeader('Role', boldFont),
-                      _tableHeader('Due Day', boldFont),
-                      _tableHeader('Type', boldFont),
-                      _tableHeader('Amount (GHS)', boldFont),
+                      _tableHeader('Base Salary', boldFont),
+                      _tableHeader('Total Paid', boldFont),
+                      _tableHeader('Advances', boldFont),
+                      _tableHeader('Loan Bal', boldFont),
                     ],
                   ),
-                  ...users.where((u) => u.salaryAmount != null).map((u) {
-                    final isAdvance = u.lastPaymentWasAdvance;
+                  ...users.where((u) => u.salaryAmount != null || u.totalSalaryPaid > 0 || u.totalAdvancesTaken > 0 || u.remainingLoanBalance > 0).map((u) {
                     return pw.TableRow(
                       children: [
                         _tableCell(u.name, font),
                         _tableCell(u.role.name.toUpperCase(), font),
-                        _tableCell('Day ${u.salaryDay ?? "--"}', font),
-                        _tableCell(
-                          isAdvance ? 'ADVANCE' : 'FULL', 
-                          boldFont, 
-                          color: isAdvance ? PdfColors.red : PdfColors.black
-                        ),
-                        _tableCell(
-                          u.salaryAmount?.toStringAsFixed(2) ?? '0.00', 
-                          boldFont,
-                          color: isAdvance ? PdfColors.red : PdfColors.black
-                        ),
+                        _tableCell(u.salaryAmount?.toStringAsFixed(2) ?? '0.00', font),
+                        _tableCell(u.totalSalaryPaid.toStringAsFixed(2), boldFont, color: PdfColors.green),
+                        _tableCell(u.totalAdvancesTaken.toStringAsFixed(2), font, color: u.totalAdvancesTaken > 0 ? PdfColors.orange : PdfColors.black),
+                        _tableCell(u.remainingLoanBalance.toStringAsFixed(2), boldFont, color: u.remainingLoanBalance > 0 ? PdfColors.purple : PdfColors.black),
                       ],
                     );
                   }),
@@ -745,8 +738,15 @@ static String _generateQRData(SaleRecord sale) {
                     children: [
                       pw.Row(
                         children: [
-                          pw.Text('Total Monthly Payroll: ', style: pw.TextStyle(font: boldFont, fontSize: 14)),
-                          pw.Text('₵ ${totalPayroll.toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 14, color: PdfColors.green)),
+                          pw.Text('Total Base Monthly Payroll: ', style: pw.TextStyle(font: boldFont, fontSize: 12)),
+                          pw.Text('GHS ${totalPayroll.toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 12, color: PdfColors.green)),
+                        ],
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Row(
+                        children: [
+                          pw.Text('Total Outstanding Loans: ', style: pw.TextStyle(font: boldFont, fontSize: 12)),
+                          pw.Text('GHS ${users.fold(0.0, (sum, u) => sum + u.remainingLoanBalance).toStringAsFixed(2)}', style: pw.TextStyle(font: boldFont, fontSize: 12, color: PdfColors.purple)),
                         ],
                       ),
                     ],
