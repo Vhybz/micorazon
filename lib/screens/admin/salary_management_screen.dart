@@ -395,27 +395,46 @@ class SalaryManagementScreen extends ConsumerWidget {
             ),
             
             const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('BASE MONTHLY', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
-                    Text(staff.salaryAmount != null ? '₵${staff.salaryAmount!.toStringAsFixed(0)}' : 'NOT SET', 
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: staff.salaryAmount == null ? Colors.red : Colors.black)),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text('NEXT PAY DAY', style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
-                    Text(staff.salaryDay != null ? 'Day ${staff.salaryDay}' : 'N/A', 
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  ],
-                ),
-              ],
-            ),
+            Builder(builder: (context) {
+              final allPayments = ref.watch(salaryHistoryProvider);
+              final lastFullSalaryDate = staff.lastSalaryDate ?? DateTime(2000);
+              final pendingAdv = allPayments
+                  .where((p) => p.userId == staff.id && p.isAdvance && p.date.isAfter(lastFullSalaryDate))
+                  .fold(0.0, (sum, p) => sum + p.amount);
+              final baseSal = staff.salaryAmount ?? 0.0;
+              final expectedNet = (baseSal - pendingAdv).clamp(0.0, double.infinity);
+
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('BASE MONTHLY', style: TextStyle(fontSize: 8, color: Colors.grey, fontWeight: FontWeight.bold)),
+                      Text(staff.salaryAmount != null ? '₵${staff.salaryAmount!.toStringAsFixed(0)}' : 'NOT SET', 
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: staff.salaryAmount == null ? Colors.red : Colors.black)),
+                    ],
+                  ),
+                  if (pendingAdv > 0)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Text('ADVANCE DEDUCT', style: TextStyle(fontSize: 8, color: Colors.orange, fontWeight: FontWeight.bold)),
+                        Text('-₵${pendingAdv.toStringAsFixed(0)}', 
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.orange)),
+                      ],
+                    ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text('EXPECTED NET PAY', style: TextStyle(fontSize: 8, color: Colors.green, fontWeight: FontWeight.bold)),
+                      Text('₵${expectedNet.toStringAsFixed(0)}', 
+                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: Colors.green)),
+                    ],
+                  ),
+                ],
+              );
+            }),
             const SizedBox(height: 16),
             Wrap(
               spacing: 6,
@@ -1918,27 +1937,69 @@ class SalaryManagementScreen extends ConsumerWidget {
                   ),
 
                   const SizedBox(height: 16),
-                  if (activeCategory == SalaryPaymentCategory.salary && pendingAdvances > 0) ...[
-                    Row(
-                      children: [
-                        Checkbox(
-                          value: deductAdvances, 
-                          onChanged: (v) {
-                            setDialogState(() {
-                              deductAdvances = v ?? false;
-                              if (deductAdvances) {
-                                amountController.text = (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2);
-                              } else {
-                                amountController.text = baseSalary.toStringAsFixed(2);
-                              }
-                            });
-                          }
-                        ),
-                        const Expanded(
-                          child: Text('Deduct Pending Advances', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                        ),
-                        Text('₵${pendingAdvances.toStringAsFixed(0)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                      ],
+                  if (activeCategory == SalaryPaymentCategory.salary) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(AppRadius.s),
+                        border: Border.all(color: Colors.green.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('EXPECTED NET PAYOUT BREAKDOWN', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.green)),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Base Monthly Salary:', style: TextStyle(fontSize: 11)),
+                              Text('₵${baseSalary.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                          if (pendingAdvances > 0) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    SizedBox(
+                                      height: 24,
+                                      width: 24,
+                                      child: Checkbox(
+                                        value: deductAdvances,
+                                        onChanged: (v) {
+                                          setDialogState(() {
+                                            deductAdvances = v ?? false;
+                                            double net = baseSalary;
+                                            if (deductAdvances) net -= pendingAdvances;
+                                            amountController.text = net.clamp(0.0, double.infinity).toStringAsFixed(2);
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    const Text('Deduct Advances:', style: TextStyle(fontSize: 11, color: Colors.orange)),
+                                  ],
+                                ),
+                                Text('-₵${pendingAdvances.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange)),
+                              ],
+                            ),
+                          ],
+                          const Divider(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('EXPECTED NET PAYOUT:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green)),
+                              Text(
+                                '₵${((baseSalary - (deductAdvances ? pendingAdvances : 0)).clamp(0.0, double.infinity)).toStringAsFixed(2)}',
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.green),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 12),
                   ],
@@ -1946,7 +2007,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                   TextField(
                     controller: amountController,
                     decoration: InputDecoration(
-                      labelText: isAdv ? 'Advance Amount' : (isLn ? 'Loan Amount' : (isRepay ? 'Repayment Amount' : 'Salary Amount')),
+                      labelText: isAdv ? 'Advance Amount' : (isLn ? 'Loan Amount' : (isRepay ? 'Repayment Amount' : 'Net Salary Amount to Pay')),
                       prefixText: '₵ ',
                       border: const OutlineInputBorder(),
                     ),
@@ -1958,7 +2019,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                     decoration: const InputDecoration(
                       labelText: 'Note (Optional)',
                       border: OutlineInputBorder(),
-                      hintText: 'e.g. Paid via MoMo / Loan agreement',
+                      hintText: 'e.g. Paid via MoMo / Bank Transfer',
                     ),
                   ),
                 ],
