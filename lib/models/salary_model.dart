@@ -115,6 +115,45 @@ class SalaryRecord {
       } catch (_) {}
     }
 
+    DateTime parsedTarget = json['target_month'] != null 
+        ? DateTime.parse(json['target_month']) 
+        : DateTime.parse(json['date']);
+
+    // Auto-correct targetMonth if note explicitly references a specific month name
+    final noteText = json['note']?.toString().toLowerCase() ?? '';
+    if (noteText.isNotEmpty) {
+      const monthNames = {
+        'january': 1, 'jan': 1,
+        'february': 2, 'feb': 2,
+        'march': 3, 'mar': 3,
+        'april': 4, 'apr': 4,
+        'may': 5,
+        'june': 6, 'jun': 6,
+        'july': 7, 'jul': 7,
+        'august': 8, 'aug': 8,
+        'september': 9, 'sept': 9, 'sep': 9,
+        'october': 10, 'oct': 10,
+        'november': 11, 'nov': 11,
+        'december': 12, 'dec': 12,
+      };
+
+      for (var entry in monthNames.entries) {
+        if (noteText.contains(entry.key)) {
+          final matchedMonth = entry.value;
+          if (matchedMonth != parsedTarget.month) {
+            int targetYear = parsedTarget.year;
+            if (matchedMonth == 12 && parsedTarget.month == 1) {
+              targetYear = parsedTarget.year - 1;
+            } else if (matchedMonth == 1 && parsedTarget.month == 12) {
+              targetYear = parsedTarget.year + 1;
+            }
+            parsedTarget = DateTime(targetYear, matchedMonth, 1);
+          }
+          break;
+        }
+      }
+    }
+
     return SalaryRecord(
       id: json['id']?.toString() ?? '',
       userId: json['user_id']?.toString() ?? '',
@@ -123,9 +162,7 @@ class SalaryRecord {
       isLoan: rawLoan,
       isLoanRepayment: rawRepayment,
       date: DateTime.parse(json['date']),
-      targetMonth: json['target_month'] != null 
-          ? DateTime.parse(json['target_month']) 
-          : DateTime.parse(json['date']),
+      targetMonth: parsedTarget,
       note: json['note'],
     );
   }

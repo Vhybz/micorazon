@@ -1257,7 +1257,25 @@ class SalaryManagementScreen extends ConsumerWidget {
     SalaryPaymentCategory activeCategory = isAdvance ? SalaryPaymentCategory.advance : initialCategory;
     Uint8List? pickedImageBytes;
     final now = DateTime.now();
-    DateTime selectedTargetMonth = DateTime(now.year, now.month, 1);
+    
+    DateTime computeExternalNextDueMonth() {
+      final currentMonthStart = DateTime(now.year, now.month, 1);
+      if (initialName != null && initialName.trim().isNotEmpty) {
+        final allPayments = ref.read(salaryHistoryProvider);
+        final workerPayments = allPayments.where((p) => p.isExternal && p.externalName?.toLowerCase() == initialName.toLowerCase()).toList();
+        if (workerPayments.isNotEmpty) {
+          workerPayments.sort((a, b) => b.targetMonth.compareTo(a.targetMonth));
+          final lastTarget = workerPayments.first.targetMonth;
+          final nextDue = DateTime(lastTarget.year, lastTarget.month + 1, 1);
+          if (!nextDue.isAfter(currentMonthStart)) {
+            return nextDue;
+          }
+        }
+      }
+      return currentMonthStart;
+    }
+
+    DateTime selectedTargetMonth = computeExternalNextDueMonth();
 
     showDialog(
       context: context,
@@ -1676,7 +1694,32 @@ class SalaryManagementScreen extends ConsumerWidget {
     bool isProcessing = false;
     bool deductAdvances = activeCategory == SalaryPaymentCategory.salary && pendingAdvances > 0; 
     final now = DateTime.now();
-    DateTime selectedTargetMonth = DateTime(now.year, now.month, 1);
+    
+    DateTime computeNextDueMonth() {
+      final currentMonthStart = DateTime(now.year, now.month, 1);
+
+      if (staff.lastSalaryDate != null) {
+        final lastPaid = staff.lastSalaryDate!;
+        final nextDue = DateTime(lastPaid.year, lastPaid.month + 1, 1);
+        if (!nextDue.isAfter(currentMonthStart)) {
+          return nextDue;
+        }
+      }
+
+      final staffPayments = allPayments.where((p) => p.userId == staff.id).toList();
+      if (staffPayments.isNotEmpty) {
+        staffPayments.sort((a, b) => b.targetMonth.compareTo(a.targetMonth));
+        final lastTarget = staffPayments.first.targetMonth;
+        final nextDue = DateTime(lastTarget.year, lastTarget.month + 1, 1);
+        if (!nextDue.isAfter(currentMonthStart)) {
+          return nextDue;
+        }
+      }
+
+      return currentMonthStart;
+    }
+
+    DateTime selectedTargetMonth = computeNextDueMonth();
 
     if (deductAdvances) {
       amountController.text = (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2);
