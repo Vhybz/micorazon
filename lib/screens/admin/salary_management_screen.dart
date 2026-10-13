@@ -401,8 +401,10 @@ class SalaryManagementScreen extends ConsumerWidget {
               final pendingAdv = allPayments
                   .where((p) => p.userId == staff.id && p.isAdvance && p.date.isAfter(lastFullSalaryDate))
                   .fold(0.0, (sum, p) => sum + p.amount);
+              final loanBal = staff.remainingLoanBalance;
               final baseSal = staff.salaryAmount ?? 0.0;
-              final expectedNet = (baseSal - pendingAdv).clamp(0.0, double.infinity);
+              final loanDeduction = loanBal.clamp(0.0, (baseSal - pendingAdv).clamp(0.0, double.infinity));
+              final expectedNet = (baseSal - pendingAdv - loanDeduction).clamp(0.0, double.infinity);
 
               return Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -422,6 +424,15 @@ class SalaryManagementScreen extends ConsumerWidget {
                         const Text('ADVANCE DEDUCT', style: TextStyle(fontSize: 8, color: Colors.orange, fontWeight: FontWeight.bold)),
                         Text('-₵${pendingAdv.toStringAsFixed(0)}', 
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.orange)),
+                      ],
+                    ),
+                  if (loanBal > 0)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Text('LOAN DEDUCT', style: TextStyle(fontSize: 8, color: Colors.purple, fontWeight: FontWeight.bold)),
+                        Text('-₵${loanDeduction.toStringAsFixed(0)}', 
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.purple.shade700)),
                       ],
                     ),
                   Column(
@@ -1744,6 +1755,11 @@ class SalaryManagementScreen extends ConsumerWidget {
       amountController.text = (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2);
     }
     
+    final double loanBalance = staff.remainingLoanBalance;
+    bool deductLoanRepayment = activeCategory == SalaryPaymentCategory.salary && loanBalance > 0;
+    double loanDeductionAmount = loanBalance.clamp(0.0, (baseSalary - (deductAdvances ? pendingAdvances : 0)).clamp(0.0, double.infinity));
+    final loanDeductionController = TextEditingController(text: loanDeductionAmount.toStringAsFixed(2));
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1791,9 +1807,10 @@ class SalaryManagementScreen extends ConsumerWidget {
                           _modeChip('Salary', SalaryPaymentCategory.salary, activeCategory, Colors.green.shade700, () {
                             setDialogState(() {
                               activeCategory = SalaryPaymentCategory.salary;
-                              amountController.text = deductAdvances 
-                                  ? (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2)
-                                  : baseSalary.toStringAsFixed(2);
+                              double net = baseSalary;
+                              if (deductAdvances) net -= pendingAdvances;
+                              if (deductLoanRepayment) net -= loanDeductionAmount;
+                              amountController.text = net.clamp(0.0, double.infinity).toStringAsFixed(2);
                             });
                           }),
                           _modeChip('Advance', SalaryPaymentCategory.advance, activeCategory, Colors.orange.shade800, () {
@@ -1974,6 +1991,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                                             deductAdvances = v ?? false;
                                             double net = baseSalary;
                                             if (deductAdvances) net -= pendingAdvances;
+                                            if (deductLoanRepayment) net -= loanDeductionAmount;
                                             amountController.text = net.clamp(0.0, double.infinity).toStringAsFixed(2);
                                           });
                                         },
@@ -1987,13 +2005,61 @@ class SalaryManagementScreen extends ConsumerWidget {
                               ],
                             ),
                           ],
+                          if (loanBalance > 0) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    SizedBox(
+                                      height: 24,
+                                      width: 24,
+                                      child: Checkbox(
+                                        value: deductLoanRepayment,
+                                        onChanged: (v) {
+                                          setDialogState(() {
+                                            deductLoanRepayment = v ?? false;
+                                            double net = baseSalary;
+                                            if (deductAdvances) net -= pendingAdvances;
+                                            if (deductLoanRepayment) net -= loanDeductionAmount;
+                                            amountController.text = net.clamp(0.0, double.infinity).toStringAsFixed(2);
+                                          });
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text('Deduct Loan (Bal: ₵${loanBalance.toStringAsFixed(0)}):', style: TextStyle(fontSize: 11, color: Colors.purple.shade700)),
+                                  ],
+                                ),
+                                SizedBox(
+                                  width: 70,
+                                  height: 30,
+                                  child: TextField(
+                                    controller: loanDeductionController,
+                                    decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4), border: OutlineInputBorder()),
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    onChanged: (val) {
+                                      setDialogState(() {
+                                        loanDeductionAmount = double.tryParse(val) ?? 0.0;
+                                        double net = baseSalary;
+                                        if (deductAdvances) net -= pendingAdvances;
+                                        if (deductLoanRepayment) net -= loanDeductionAmount;
+                                        amountController.text = net.clamp(0.0, double.infinity).toStringAsFixed(2);
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           const Divider(height: 16),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('EXPECTED NET PAYOUT:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green)),
+                              const Text('EXPECTED NET SALARY TO PAY:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green)),
                               Text(
-                                '₵${((baseSalary - (deductAdvances ? pendingAdvances : 0)).clamp(0.0, double.infinity)).toStringAsFixed(2)}',
+                                '₵${((baseSalary - (deductAdvances ? pendingAdvances : 0) - (deductLoanRepayment ? loanDeductionAmount : 0)).clamp(0.0, double.infinity)).toStringAsFixed(2)}',
                                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.green),
                               ),
                             ],
@@ -2033,7 +2099,9 @@ class SalaryManagementScreen extends ConsumerWidget {
               ElevatedButton(
                 onPressed: isProcessing ? null : () async {
                   final double amount = double.tryParse(amountController.text) ?? 0.0;
-                  if (amount <= 0) {
+                  if (amount <= 0 && activeCategory == SalaryPaymentCategory.salary && (deductAdvances || deductLoanRepayment)) {
+                    // Allowed if salary was fully wiped by advance/loan deductions
+                  } else if (amount <= 0) {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount')));
                     return;
                   }
@@ -2053,10 +2121,26 @@ class SalaryManagementScreen extends ConsumerWidget {
                       note: noteController.text.trim().isEmpty ? null : noteController.text.trim(),
                     );
 
-                    // 1. Add to history
+                    // 1. Add primary salary payment to history
                     await ref.read(salaryHistoryProvider.notifier).addPayment(record);
-                    
-                    // 2. Update user profile stats
+
+                    // 2. Auto-record loan repayment if loan deduction was applied
+                    if (activeCategory == SalaryPaymentCategory.salary && deductLoanRepayment && loanDeductionAmount > 0) {
+                      final loanRepaymentRecord = SalaryRecord(
+                        id: UuidUtils.generate(),
+                        userId: staff.id,
+                        amount: loanDeductionAmount,
+                        isAdvance: false,
+                        isLoan: false,
+                        isLoanRepayment: true,
+                        date: DateTime.now(),
+                        targetMonth: selectedTargetMonth,
+                        note: 'Deducted from ${DateFormat('MMMM yyyy').format(selectedTargetMonth)} salary payout',
+                      );
+                      await ref.read(salaryHistoryProvider.notifier).addPayment(loanRepaymentRecord);
+                    }
+
+                    // 3. Update user profile stats
                     await ref.read(userProvider.notifier).updateSalary(
                       staff.id,
                       lastPaid: (isAdv || isLn || isRepay) ? staff.lastSalaryDate : DateTime.now(),
@@ -2064,7 +2148,7 @@ class SalaryManagementScreen extends ConsumerWidget {
                       addSalaryPaid: (!isAdv && !isLn && !isRepay) ? amount : 0,
                       addAdvanceTaken: isAdv ? amount : 0,
                       addLoanTaken: isLn ? amount : 0,
-                      addLoanRepaid: isRepay ? amount : 0,
+                      addLoanRepaid: (isRepay ? amount : 0) + ((activeCategory == SalaryPaymentCategory.salary && deductLoanRepayment) ? loanDeductionAmount : 0),
                     );
 
                     // 3. Send SMS if possible
