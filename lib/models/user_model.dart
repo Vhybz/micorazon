@@ -46,9 +46,13 @@ class UserAccount {
   final String? themeMode; // 'light', 'dark', 'system'
   final int? themePrimaryColor;
 
-  // Cumulative Payroll Stats (DB backed)
+  // Cumulative Payroll & Loan Stats (DB backed)
   final double totalSalaryPaid;
   final double totalAdvancesTaken;
+  final double totalLoansTaken;
+  final double totalLoansRepaid;
+
+  double get remainingLoanBalance => (totalLoansTaken - totalLoansRepaid).clamp(0.0, double.infinity);
 
   UserAccount({
     required this.id,
@@ -83,6 +87,8 @@ class UserAccount {
     this.themePrimaryColor,
     this.totalSalaryPaid = 0.0,
     this.totalAdvancesTaken = 0.0,
+    this.totalLoansTaken = 0.0,
+    this.totalLoansRepaid = 0.0,
   }) : createdAt = createdAt ?? DateTime.now();
 
   factory UserAccount.fromJson(Map<String, dynamic> json) {
@@ -155,6 +161,8 @@ class UserAccount {
       themePrimaryColor: json['theme_primary_color'] != null ? int.tryParse(json['theme_primary_color'].toString()) : null,
       totalSalaryPaid: (json['total_salary_paid'] as num? ?? 0.0).toDouble(),
       totalAdvancesTaken: (json['total_advances_taken'] as num? ?? 0.0).toDouble(),
+      totalLoansTaken: (json['total_loans_taken'] as num? ?? 0.0).toDouble(),
+      totalLoansRepaid: (json['total_loans_repaid'] as num? ?? 0.0).toDouble(),
     );
   }
 
@@ -192,6 +200,8 @@ class UserAccount {
       'theme_primary_color': themePrimaryColor,
       'total_salary_paid': totalSalaryPaid,
       'total_advances_taken': totalAdvancesTaken,
+      'total_loans_taken': totalLoansTaken,
+      'total_loans_repaid': totalLoansRepaid,
     };
   }
 
@@ -259,6 +269,8 @@ class UserAccount {
     int? themePrimaryColor,
     double? totalSalaryPaid,
     double? totalAdvancesTaken,
+    double? totalLoansTaken,
+    double? totalLoansRepaid,
     bool clearPromotion = false,
   }) {
     return UserAccount(
@@ -294,6 +306,8 @@ class UserAccount {
       themePrimaryColor: themePrimaryColor ?? this.themePrimaryColor,
       totalSalaryPaid: totalSalaryPaid ?? this.totalSalaryPaid,
       totalAdvancesTaken: totalAdvancesTaken ?? this.totalAdvancesTaken,
+      totalLoansTaken: totalLoansTaken ?? this.totalLoansTaken,
+      totalLoansRepaid: totalLoansRepaid ?? this.totalLoansRepaid,
     );
   }
 }

@@ -960,12 +960,12 @@ static String _generateQRData(SaleRecord sale) {
                     ],
                   ),
                   ...history.map((r) {
-                    final color = r.isAdvance ? PdfColors.red : PdfColors.black;
+                    final color = r.isLoan ? PdfColors.purple : (r.isLoanRepayment ? PdfColors.teal : (r.isAdvance ? PdfColors.red : PdfColors.black));
                     return pw.TableRow(
                       children: [
                         _tableCell(DateFormat('yyyy-MM-dd').format(r.date), font, color: color),
                         _tableCell(DateFormat('MMMM yyyy').format(r.targetMonth), font, color: color),
-                        _tableCell(r.isAdvance ? 'ADVANCE' : 'FULL', boldFont, color: color),
+                        _tableCell(r.categoryLabel, boldFont, color: color),
                         _tableCell(r.displayNote ?? '--', font, color: color),
                         _tableCell(r.amount.toStringAsFixed(2), boldFont, color: color),
                       ],
@@ -1005,7 +1005,15 @@ static String _generateQRData(SaleRecord sale) {
     }
   }
 
-  static Future<void> printPayslip(UserAccount user, double amount, bool isAdvance, {String? note, DateTime? targetMonth}) async {
+  static Future<void> printPayslip(
+    UserAccount user, 
+    double amount, 
+    bool isAdvance, {
+    String? note, 
+    DateTime? targetMonth,
+    bool isLoan = false,
+    bool isLoanRepayment = false,
+  }) async {
     try {
       final isExternal = user.id == 'EXTERNAL';
       final doc = pw.Document();
@@ -1019,6 +1027,21 @@ static String _generateQRData(SaleRecord sale) {
       } catch (e) {
         font = pw.Font.helvetica();
         boldFont = pw.Font.helveticaBold();
+      }
+
+      String typeLabel = 'FULL SALARY';
+      PdfColor typeColor = PdfColors.black;
+      if (isLoan) {
+        typeLabel = 'LOAN DISBURSED';
+        typeColor = PdfColors.purple;
+      } else if (isLoanRepayment) {
+        typeLabel = 'LOAN REPAYMENT';
+        typeColor = PdfColors.teal;
+      } else if (isAdvance) {
+        typeLabel = 'SALARY ADVANCE';
+        typeColor = PdfColors.orange;
+      } else if (isExternal) {
+        typeLabel = 'WORK PAYMENT';
       }
 
       doc.addPage(
@@ -1056,8 +1079,8 @@ static String _generateQRData(SaleRecord sale) {
                   children: [
                     pw.Text('PAYMENT TYPE:', style: pw.TextStyle(font: font, fontSize: 9)),
                     pw.Text(
-                      isAdvance ? 'ADVANCE' : (isExternal ? 'WORK PAYMENT' : 'FULL SALARY'), 
-                      style: pw.TextStyle(font: boldFont, fontSize: 9, color: isAdvance ? PdfColors.red : PdfColors.black)
+                      typeLabel, 
+                      style: pw.TextStyle(font: boldFont, fontSize: 9, color: typeColor)
                     ),
                   ],
                 ),
@@ -1070,14 +1093,14 @@ static String _generateQRData(SaleRecord sale) {
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('AMOUNT PAID:', style: pw.TextStyle(font: boldFont, fontSize: 12)),
+                    pw.Text('AMOUNT:', style: pw.TextStyle(font: boldFont, fontSize: 12)),
                     pw.Text(
                       'GHS ${amount.toStringAsFixed(2)}', 
-                      style: pw.TextStyle(font: boldFont, fontSize: 12, color: isAdvance ? PdfColors.red : PdfColors.green)
+                      style: pw.TextStyle(font: boldFont, fontSize: 12, color: typeColor)
                     ),
                   ],
                 ),
-                if (!isAdvance && !isExternal && user.salaryAmount != null)
+                if (!isAdvance && !isLoan && !isLoanRepayment && !isExternal && user.salaryAmount != null)
                    _payslipRow('Base Salary:', 'GHS ${user.salaryAmount!.toStringAsFixed(2)}', font, boldFont, fontSize: 8),
                 
                 pw.SizedBox(height: 20),

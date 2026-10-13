@@ -357,10 +357,6 @@ class SalaryManagementScreen extends ConsumerWidget {
             // Financial Summary Section
             Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(12),
-              ),
               child: Row(
                 children: [
                   Expanded(
@@ -368,18 +364,29 @@ class SalaryManagementScreen extends ConsumerWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text('LIFETIME PAID', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text('₵${staff.totalSalaryPaid.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.green)),
+                        Text('₵${staff.totalSalaryPaid.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green)),
                       ],
                     ),
                   ),
                   Container(width: 1, height: 24, color: theme.dividerColor),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('TOTAL ADVANCES', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text('₵${staff.totalAdvancesTaken.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.orange)),
+                        const Text('ADVANCES', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                        Text('₵${staff.totalAdvancesTaken.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.orange)),
+                      ],
+                    ),
+                  ),
+                  Container(width: 1, height: 24, color: theme.dividerColor),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('LOAN BAL', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                        Text('₵${staff.remainingLoanBalance.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: staff.remainingLoanBalance > 0 ? Colors.purple.shade700 : Colors.grey)),
                       ],
                     ),
                   ),
@@ -410,21 +417,35 @@ class SalaryManagementScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 16),
-            Row(
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 _salaryActionButton(
                   context, 
-                  label: 'ISSUE ADVANCE', 
+                  label: 'ADVANCE', 
                   color: Colors.orange.shade800, 
-                  onPressed: () => _handlePayment(context, ref, staff, isAdvance: true)
+                  onPressed: () => _handlePayment(context, ref, staff, initialCategory: SalaryPaymentCategory.advance)
                 ),
-                const SizedBox(width: 8),
                 _salaryActionButton(
                   context, 
                   label: isPaidThisMonth ? 'SALARY PAID' : 'PAY SALARY', 
                   color: isPaidThisMonth ? Colors.grey : Colors.green.shade700, 
-                  onPressed: isPaidThisMonth ? null : () => _handlePayment(context, ref, staff, isAdvance: false)
+                  onPressed: isPaidThisMonth ? null : () => _handlePayment(context, ref, staff, initialCategory: SalaryPaymentCategory.salary)
                 ),
+                _salaryActionButton(
+                  context, 
+                  label: 'ISSUE LOAN', 
+                  color: Colors.purple.shade700, 
+                  onPressed: () => _handlePayment(context, ref, staff, initialCategory: SalaryPaymentCategory.loan)
+                ),
+                if (staff.remainingLoanBalance > 0)
+                  _salaryActionButton(
+                    context, 
+                    label: 'REPAY LOAN', 
+                    color: Colors.teal.shade700, 
+                    onPressed: () => _handlePayment(context, ref, staff, initialCategory: SalaryPaymentCategory.loanRepayment)
+                  ),
               ],
             ),
             const SizedBox(height: 12),
@@ -637,30 +658,47 @@ class SalaryManagementScreen extends ConsumerWidget {
                 color: Colors.orange.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('LIFETIME PAID', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text('₵${totalPaid.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.green)),
-                      ],
+              child: Builder(builder: (context) {
+                final totalLoanTaken = records.where((r) => r.isLoan).fold(0.0, (sum, r) => sum + r.amount);
+                final totalLoanRepaid = records.where((r) => r.isLoanRepayment).fold(0.0, (sum, r) => sum + r.amount);
+                final loanBal = (totalLoanTaken - totalLoanRepaid).clamp(0.0, double.infinity);
+
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('LIFETIME PAID', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                          Text('₵${totalPaid.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green)),
+                        ],
+                      ),
                     ),
-                  ),
-                  Container(width: 1, height: 24, color: theme.dividerColor),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('TOTAL ADVANCES', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text('₵${records.where((r) => r.isAdvance).fold(0.0, (sum, r) => sum + r.amount).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.orange)),
-                      ],
+                    Container(width: 1, height: 24, color: theme.dividerColor),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('ADVANCES', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                          Text('₵${records.where((r) => r.isAdvance).fold(0.0, (sum, r) => sum + r.amount).toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.orange)),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                    Container(width: 1, height: 24, color: theme.dividerColor),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('LOAN BAL', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                          Text('₵${loanBal.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: loanBal > 0 ? Colors.purple.shade700 : Colors.grey)),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              }),
             ),
             
             const SizedBox(height: 16),
@@ -686,21 +724,40 @@ class SalaryManagementScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 16),
-            Row(
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
               children: [
                 _salaryActionButton(
                   context, 
-                  label: 'ISSUE ADVANCE', 
+                  label: 'ADVANCE', 
                   color: Colors.orange.shade800, 
-                  onPressed: () => _handleExternalPayment(context, ref, initialName: name, isAdvance: true)
+                  onPressed: () => _handleExternalPayment(context, ref, initialName: name, initialCategory: SalaryPaymentCategory.advance)
                 ),
-                const SizedBox(width: 8),
                 _salaryActionButton(
                   context, 
                   label: isPaidThisMonth ? 'SALARY PAID' : 'PAY WORKER', 
                   color: isPaidThisMonth ? Colors.grey : Colors.green.shade700, 
-                  onPressed: isPaidThisMonth ? null : () => _handleExternalPayment(context, ref, initialName: name, isAdvance: false)
+                  onPressed: isPaidThisMonth ? null : () => _handleExternalPayment(context, ref, initialName: name, initialCategory: SalaryPaymentCategory.salary)
                 ),
+                _salaryActionButton(
+                  context, 
+                  label: 'ISSUE LOAN', 
+                  color: Colors.purple.shade700, 
+                  onPressed: () => _handleExternalPayment(context, ref, initialName: name, initialCategory: SalaryPaymentCategory.loan)
+                ),
+                Builder(builder: (context) {
+                  final totalLoanTaken = records.where((r) => r.isLoan).fold(0.0, (sum, r) => sum + r.amount);
+                  final totalLoanRepaid = records.where((r) => r.isLoanRepayment).fold(0.0, (sum, r) => sum + r.amount);
+                  final loanBal = totalLoanTaken - totalLoanRepaid;
+                  if (loanBal <= 0) return const SizedBox.shrink();
+                  return _salaryActionButton(
+                    context, 
+                    label: 'REPAY LOAN', 
+                    color: Colors.teal.shade700, 
+                    onPressed: () => _handleExternalPayment(context, ref, initialName: name, initialCategory: SalaryPaymentCategory.loanRepayment)
+                  );
+                }),
               ],
             ),
             const SizedBox(height: 12),
@@ -1183,7 +1240,13 @@ class SalaryManagementScreen extends ConsumerWidget {
     );
   }
 
-  void _handleExternalPayment(BuildContext context, WidgetRef ref, {String? initialName, bool isAdvance = false}) {
+  void _handleExternalPayment(
+    BuildContext context, 
+    WidgetRef ref, {
+    String? initialName, 
+    bool isAdvance = false,
+    SalaryPaymentCategory initialCategory = SalaryPaymentCategory.salary,
+  }) {
     final nameController = TextEditingController(text: initialName);
     final phoneController = TextEditingController();
     final emailController = TextEditingController();
@@ -1191,7 +1254,7 @@ class SalaryManagementScreen extends ConsumerWidget {
     final noteController = TextEditingController();
 
     bool isProcessing = false;
-    bool currentIsAdvance = isAdvance;
+    SalaryPaymentCategory activeCategory = isAdvance ? SalaryPaymentCategory.advance : initialCategory;
     Uint8List? pickedImageBytes;
     final now = DateTime.now();
     DateTime selectedTargetMonth = DateTime(now.year, now.month, 1);
@@ -1299,15 +1362,35 @@ class SalaryManagementScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
                   
-                  // Advance Toggle
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Mark as Salary Advance', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                    subtitle: const Text('Funds given ahead of work completion.', style: TextStyle(fontSize: 10)),
-                    value: currentIsAdvance,
-                    activeThumbColor: Colors.orange,
-                    onChanged: (v) => setDialogState(() => currentIsAdvance = v),
+                  const SizedBox(height: 12),
+                  // Transaction Type Mode Selector
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(AppRadius.m),
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _modeChip('Work Payment', SalaryPaymentCategory.salary, activeCategory, Colors.green.shade700, () {
+                            setDialogState(() => activeCategory = SalaryPaymentCategory.salary);
+                          }),
+                          _modeChip('Advance', SalaryPaymentCategory.advance, activeCategory, Colors.orange.shade800, () {
+                            setDialogState(() => activeCategory = SalaryPaymentCategory.advance);
+                          }),
+                          _modeChip('Issue Loan', SalaryPaymentCategory.loan, activeCategory, Colors.purple.shade700, () {
+                            setDialogState(() => activeCategory = SalaryPaymentCategory.loan);
+                          }),
+                          _modeChip('Repay Loan', SalaryPaymentCategory.loanRepayment, activeCategory, Colors.teal.shade700, () {
+                            setDialogState(() => activeCategory = SalaryPaymentCategory.loanRepayment);
+                          }),
+                        ],
+                      ),
+                    ),
                   ),
+                  const SizedBox(height: 12),
 
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -1357,7 +1440,6 @@ class SalaryManagementScreen extends ConsumerWidget {
 
                     // Upload Image if picked
                     if (pickedImageBytes != null) {
-                      // Use stable identifier for external worker to allow picture management/cleanup
                       final String identifier = '${name}_${phoneController.text.trim()}'.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_').toLowerCase();
                       uploadedUrl = await ref.read(userProvider.notifier).uploadExternalPhoto(identifier, pickedImageBytes!);
                     }
@@ -1372,11 +1454,17 @@ class SalaryManagementScreen extends ConsumerWidget {
                       'user_note': noteController.text.trim(),
                     };
 
+                    final bool isAdv = activeCategory == SalaryPaymentCategory.advance;
+                    final bool isLn = activeCategory == SalaryPaymentCategory.loan;
+                    final bool isRepay = activeCategory == SalaryPaymentCategory.loanRepayment;
+
                     final record = SalaryRecord(
                       id: recordId,
                       userId: 'EXTERNAL',
                       amount: amount,
-                      isAdvance: currentIsAdvance,
+                      isAdvance: isAdv,
+                      isLoan: isLn,
+                      isLoanRepayment: isRepay,
                       date: DateTime.now(),
                       targetMonth: selectedTargetMonth,
                       note: json.encode(metadata),
@@ -1551,17 +1639,23 @@ class SalaryManagementScreen extends ConsumerWidget {
     );
   }
 
-  void _handlePayment(BuildContext context, WidgetRef ref, UserAccount staff, {required bool isAdvance}) {
+  void _handlePayment(
+    BuildContext context, 
+    WidgetRef ref, 
+    UserAccount staff, {
+    bool isAdvance = false,
+    SalaryPaymentCategory initialCategory = SalaryPaymentCategory.salary,
+  }) {
     final allPayments = ref.read(salaryHistoryProvider);
     final lastFullSalaryDate = staff.lastSalaryDate ?? DateTime(2000);
     
     // 1. Calculations
     final double lifetimeSalaryPaid = allPayments
-        .where((p) => p.userId == staff.id && !p.isAdvance)
+        .where((p) => p.userId == staff.id && p.paymentCategory == SalaryPaymentCategory.salary)
         .fold(0.0, (sum, p) => sum + p.amount);
         
     final double lifetimeAdvancesTaken = allPayments
-        .where((p) => p.userId == staff.id && p.isAdvance)
+        .where((p) => p.userId == staff.id && p.paymentCategory == SalaryPaymentCategory.advance)
         .fold(0.0, (sum, p) => sum + p.amount);
 
     final double pendingAdvances = allPayments
@@ -1570,15 +1664,20 @@ class SalaryManagementScreen extends ConsumerWidget {
 
     final double baseSalary = staff.salaryAmount ?? 0.0;
     
-    final amountController = TextEditingController(text: isAdvance ? '' : baseSalary.toStringAsFixed(2));
+    SalaryPaymentCategory activeCategory = isAdvance 
+        ? SalaryPaymentCategory.advance 
+        : initialCategory;
+
+    final amountController = TextEditingController(
+      text: activeCategory == SalaryPaymentCategory.salary ? baseSalary.toStringAsFixed(2) : ''
+    );
     final noteController = TextEditingController();
     
     bool isProcessing = false;
-    bool deductAdvances = !isAdvance && pendingAdvances > 0; 
+    bool deductAdvances = activeCategory == SalaryPaymentCategory.salary && pendingAdvances > 0; 
     final now = DateTime.now();
     DateTime selectedTargetMonth = DateTime(now.year, now.month, 1);
 
-    // Initial amount update if deducting
     if (deductAdvances) {
       amountController.text = (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2);
     }
@@ -1587,237 +1686,316 @@ class SalaryManagementScreen extends ConsumerWidget {
       context: context,
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
-          title: Text(isAdvance ? 'Salary Advance' : 'Confirm Payment'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Paying ${staff.name}'),
-                const SizedBox(height: 16),
+        builder: (context, setDialogState) {
+          final isAdv = activeCategory == SalaryPaymentCategory.advance;
+          final isLn = activeCategory == SalaryPaymentCategory.loan;
+          final isRepay = activeCategory == SalaryPaymentCategory.loanRepayment;
 
-                // Lifetime Summary
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(AppRadius.s),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('LIFETIME SALARY', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
-                            Text('₵${lifetimeSalaryPaid.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green)),
-                          ],
-                        ),
+          String dialogTitle = 'Confirm Salary Payment';
+          Color actionColor = Colors.green.shade700;
+          if (isAdv) {
+            dialogTitle = 'Issue Salary Advance';
+            actionColor = Colors.orange.shade800;
+          } else if (isLn) {
+            dialogTitle = 'Issue Loan to Staff';
+            actionColor = Colors.purple.shade700;
+          } else if (isRepay) {
+            dialogTitle = 'Record Loan Repayment';
+            actionColor = Colors.teal.shade700;
+          }
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.l)),
+            title: Text(dialogTitle),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Staff: ${staff.name}'),
+                  const SizedBox(height: 12),
+
+                  // Mode Selector Segment
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade200,
+                      borderRadius: BorderRadius.circular(AppRadius.m),
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _modeChip('Salary', SalaryPaymentCategory.salary, activeCategory, Colors.green.shade700, () {
+                            setDialogState(() {
+                              activeCategory = SalaryPaymentCategory.salary;
+                              amountController.text = deductAdvances 
+                                  ? (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2)
+                                  : baseSalary.toStringAsFixed(2);
+                            });
+                          }),
+                          _modeChip('Advance', SalaryPaymentCategory.advance, activeCategory, Colors.orange.shade800, () {
+                            setDialogState(() {
+                              activeCategory = SalaryPaymentCategory.advance;
+                              amountController.text = '';
+                            });
+                          }),
+                          _modeChip('Issue Loan', SalaryPaymentCategory.loan, activeCategory, Colors.purple.shade700, () {
+                            setDialogState(() {
+                              activeCategory = SalaryPaymentCategory.loan;
+                              amountController.text = '';
+                            });
+                          }),
+                          _modeChip('Repay Loan', SalaryPaymentCategory.loanRepayment, activeCategory, Colors.teal.shade700, () {
+                            setDialogState(() {
+                              activeCategory = SalaryPaymentCategory.loanRepayment;
+                              amountController.text = staff.remainingLoanBalance > 0 
+                                  ? staff.remainingLoanBalance.toStringAsFixed(2) 
+                                  : '';
+                            });
+                          }),
+                        ],
                       ),
-                      Container(width: 1, height: 20, color: Colors.grey.withValues(alpha: 0.3)),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('LIFETIME ADVANCES', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
-                            Text('₵${lifetimeAdvancesTaken.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.orange)),
-                          ],
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                
-                // Payment Date (Uneditable)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(AppRadius.s),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.event_available, size: 20, color: Colors.grey),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('PAYMENT DATE (TODAY):', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.grey)),
-                            Text(DateFormat('MMMM dd, yyyy').format(now), 
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black54)),
-                          ],
-                        ),
-                      ),
-                      const Icon(Icons.lock_outline, size: 16, color: Colors.grey),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 12),
-                
-                // Target Month Selector (Editable)
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      initialDate: selectedTargetMonth,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2100),
-                    );
-                    if (picked != null) {
-                      setDialogState(() => selectedTargetMonth = DateTime(picked.year, picked.month, 1));
-                    }
-                  },
-                  child: Container(
+                  const SizedBox(height: 16),
+
+                  // Lifetime Summary Box
+                  Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(AppRadius.s),
-                      border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
-                      color: Colors.blue.withValues(alpha: 0.05),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.calendar_month_rounded, size: 20, color: Colors.blue),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('PAID', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                              Text('₵${lifetimeSalaryPaid.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green)),
+                            ],
+                          ),
+                        ),
+                        Container(width: 1, height: 20, color: Colors.grey.withValues(alpha: 0.3)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('ADVANCES', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                              Text('₵${lifetimeAdvancesTaken.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.orange)),
+                            ],
+                          ),
+                        ),
+                        Container(width: 1, height: 20, color: Colors.grey.withValues(alpha: 0.3)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('LOAN BAL', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+                              Text('₵${staff.remainingLoanBalance.toStringAsFixed(0)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: staff.remainingLoanBalance > 0 ? Colors.purple.shade700 : Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Payment Date (Uneditable)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(AppRadius.s),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.event_available, size: 20, color: Colors.grey),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('PAYMENT FOR MONTH:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.blue)),
-                              Text(DateFormat('MMMM yyyy').format(selectedTargetMonth), 
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blue)),
+                              const Text('PAYMENT DATE (TODAY):', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.grey)),
+                              Text(DateFormat('MMMM dd, yyyy').format(now), 
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black54)),
                             ],
                           ),
                         ),
-                        const Icon(Icons.edit_calendar_rounded, size: 16, color: Colors.blue),
+                        const Icon(Icons.lock_outline, size: 16, color: Colors.grey),
                       ],
                     ),
                   ),
-                ),
-
-                const SizedBox(height: 16),
-                if (!isAdvance && pendingAdvances > 0) ...[
-                  Row(
-                    children: [
-                      Checkbox(
-                        value: deductAdvances, 
-                        onChanged: (v) {
-                          setDialogState(() {
-                            deductAdvances = v ?? false;
-                            if (deductAdvances) {
-                              amountController.text = (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2);
-                            } else {
-                              amountController.text = baseSalary.toStringAsFixed(2);
-                            }
-                          });
-                        }
-                      ),
-                      const Expanded(
-                        child: Text('Deduct Pending Advances', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
-                      Text('₵${pendingAdvances.toStringAsFixed(0)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                ],
-
-                TextField(
-                  controller: amountController,
-                  decoration: InputDecoration(
-                    labelText: isAdvance ? 'Advance Amount' : 'Payment Amount',
-                    prefixText: '₵ ',
-                    border: const OutlineInputBorder(),
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: noteController,
-                  decoration: const InputDecoration(
-                    labelText: 'Note (Optional)',
-                    border: OutlineInputBorder(),
-                    hintText: 'e.g. Paid via MoMo',
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: isProcessing ? null : () => Navigator.pop(context),
-              child: const Text('CANCEL'),
-            ),
-            ElevatedButton(
-              onPressed: isProcessing ? null : () async {
-                final double amount = double.tryParse(amountController.text) ?? 0.0;
-                if (amount <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount')));
-                  return;
-                }
-
-                setDialogState(() => isProcessing = true);
-
-                try {
-                  final record = SalaryRecord(
-                    id: UuidUtils.generate(),
-                    userId: staff.id,
-                    amount: amount,
-                    isAdvance: isAdvance,
-                    date: DateTime.now(),
-                    targetMonth: selectedTargetMonth,
-                    note: noteController.text.trim().isEmpty ? null : noteController.text.trim(),
-                  );
-
-                  // 1. Add to history
-                  await ref.read(salaryHistoryProvider.notifier).addPayment(record);
                   
-                  // 2. Update user profile stats
-                  await ref.read(userProvider.notifier).updateSalary(
-                    staff.id,
-                    lastPaid: isAdvance ? staff.lastSalaryDate : DateTime.now(),
-                    isAdvance: isAdvance,
-                    addSalaryPaid: isAdvance ? 0 : amount,
-                    addAdvanceTaken: isAdvance ? amount : 0,
-                  );
+                  const SizedBox(height: 12),
+                  
+                  // Target Month Selector
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: selectedTargetMonth,
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime(2100),
+                      );
+                      if (picked != null) {
+                        setDialogState(() => selectedTargetMonth = DateTime(picked.year, picked.month, 1));
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(AppRadius.s),
+                        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                        color: Colors.blue.withValues(alpha: 0.05),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_month_rounded, size: 20, color: Colors.blue),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('FOR MONTH:', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.blue)),
+                                Text(DateFormat('MMMM yyyy').format(selectedTargetMonth), 
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blue)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.edit_calendar_rounded, size: 16, color: Colors.blue),
+                        ],
+                      ),
+                    ),
+                  ),
 
-                  // 3. Send SMS if possible
-                  if (staff.phone != null && staff.phone!.isNotEmpty) {
-                    await SmsService.sendSalarySms(
-                      phone: staff.phone!,
-                      firstName: staff.firstName,
-                      amount: amount,
-                      isAdvance: isAdvance,
-                      targetMonth: selectedTargetMonth,
-                    );
-                  }
+                  const SizedBox(height: 16),
+                  if (activeCategory == SalaryPaymentCategory.salary && pendingAdvances > 0) ...[
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: deductAdvances, 
+                          onChanged: (v) {
+                            setDialogState(() {
+                              deductAdvances = v ?? false;
+                              if (deductAdvances) {
+                                amountController.text = (baseSalary - pendingAdvances).clamp(0.0, double.infinity).toStringAsFixed(2);
+                              } else {
+                                amountController.text = baseSalary.toStringAsFixed(2);
+                              }
+                            });
+                          }
+                        ),
+                        const Expanded(
+                          child: Text('Deduct Pending Advances', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        ),
+                        Text('₵${pendingAdvances.toStringAsFixed(0)}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
 
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    _showPaymentSuccess(context, ref, staff, record);
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    setDialogState(() => isProcessing = false);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Payment failed: $e')));
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isAdvance ? Colors.orange.shade800 : Colors.green.shade700,
-                foregroundColor: Colors.white,
+                  TextField(
+                    controller: amountController,
+                    decoration: InputDecoration(
+                      labelText: isAdv ? 'Advance Amount' : (isLn ? 'Loan Amount' : (isRepay ? 'Repayment Amount' : 'Salary Amount')),
+                      prefixText: '₵ ',
+                      border: const OutlineInputBorder(),
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: noteController,
+                    decoration: const InputDecoration(
+                      labelText: 'Note (Optional)',
+                      border: OutlineInputBorder(),
+                      hintText: 'e.g. Paid via MoMo / Loan agreement',
+                    ),
+                  ),
+                ],
               ),
-              child: isProcessing 
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : Text(isAdvance ? 'ISSUE ADVANCE' : 'CONFIRM PAYMENT'),
             ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: isProcessing ? null : () => Navigator.pop(context),
+                child: const Text('CANCEL'),
+              ),
+              ElevatedButton(
+                onPressed: isProcessing ? null : () async {
+                  final double amount = double.tryParse(amountController.text) ?? 0.0;
+                  if (amount <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid amount')));
+                    return;
+                  }
+
+                  setDialogState(() => isProcessing = true);
+
+                  try {
+                    final record = SalaryRecord(
+                      id: UuidUtils.generate(),
+                      userId: staff.id,
+                      amount: amount,
+                      isAdvance: isAdv,
+                      isLoan: isLn,
+                      isLoanRepayment: isRepay,
+                      date: DateTime.now(),
+                      targetMonth: selectedTargetMonth,
+                      note: noteController.text.trim().isEmpty ? null : noteController.text.trim(),
+                    );
+
+                    // 1. Add to history
+                    await ref.read(salaryHistoryProvider.notifier).addPayment(record);
+                    
+                    // 2. Update user profile stats
+                    await ref.read(userProvider.notifier).updateSalary(
+                      staff.id,
+                      lastPaid: (isAdv || isLn || isRepay) ? staff.lastSalaryDate : DateTime.now(),
+                      isAdvance: isAdv,
+                      addSalaryPaid: (!isAdv && !isLn && !isRepay) ? amount : 0,
+                      addAdvanceTaken: isAdv ? amount : 0,
+                      addLoanTaken: isLn ? amount : 0,
+                      addLoanRepaid: isRepay ? amount : 0,
+                    );
+
+                    // 3. Send SMS if possible
+                    if (staff.phone != null && staff.phone!.isNotEmpty) {
+                      await SmsService.sendSalarySms(
+                        phone: staff.phone!,
+                        firstName: staff.firstName,
+                        amount: amount,
+                        isAdvance: isAdv,
+                        targetMonth: selectedTargetMonth,
+                      );
+                    }
+
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      _showPaymentSuccess(context, ref, staff, record);
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      setDialogState(() => isProcessing = false);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Payment failed: $e')));
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: actionColor,
+                  foregroundColor: Colors.white,
+                ),
+                child: isProcessing 
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : Text(isAdv ? 'ISSUE ADVANCE' : (isLn ? 'ISSUE LOAN' : (isRepay ? 'RECORD REPAYMENT' : 'CONFIRM PAYMENT'))),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -1840,7 +2018,15 @@ class SalaryManagementScreen extends ConsumerWidget {
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
-              ReceiptService.printPayslip(staff, record.amount, record.isAdvance, note: record.note, targetMonth: record.targetMonth);
+              ReceiptService.printPayslip(
+                staff, 
+                record.amount, 
+                record.isAdvance, 
+                note: record.displayNote, 
+                targetMonth: record.targetMonth,
+                isLoan: record.isLoan,
+                isLoanRepayment: record.isLoanRepayment,
+              );
             }, 
             icon: const Icon(Icons.print_rounded),
             label: const Text('PRINT PAYSLIP'),
@@ -2054,6 +2240,20 @@ class SalaryManagementScreen extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _modeChip(String label, SalaryPaymentCategory cat, SalaryPaymentCategory active, Color color, VoidCallback onTap) {
+    final selected = active == cat;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: ChoiceChip(
+        label: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: selected ? Colors.white : Colors.black87)),
+        selected: selected,
+        selectedColor: color,
+        onSelected: (_) => onTap(),
+        visualDensity: VisualDensity.compact,
       ),
     );
   }

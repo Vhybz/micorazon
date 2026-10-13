@@ -317,28 +317,34 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
     bool? isAdvance,
     double? addSalaryPaid,
     double? addAdvanceTaken,
+    double? addLoanTaken,
+    double? addLoanRepaid,
   }) async {
     try {
       final user = await _getUser(userId);
       if (user != null) {
         // We still update the local state so the UI looks correct
         final updatedUser = user.copyWith(
-          salaryAmount: amount,
-          salaryDay: day,
-          lastSalaryDate: lastPaid,
-          lastPaymentWasAdvance: isAdvance,
+          salaryAmount: amount ?? user.salaryAmount,
+          salaryDay: day ?? user.salaryDay,
+          lastSalaryDate: lastPaid ?? user.lastSalaryDate,
+          lastPaymentWasAdvance: isAdvance ?? user.lastPaymentWasAdvance,
           totalSalaryPaid: user.totalSalaryPaid + (addSalaryPaid ?? 0),
           totalAdvancesTaken: user.totalAdvancesTaken + (addAdvanceTaken ?? 0),
+          totalLoansTaken: user.totalLoansTaken + (addLoanTaken ?? 0),
+          totalLoansRepaid: user.totalLoansRepaid + (addLoanRepaid ?? 0),
         );
         
         _updateLocalAndSession(updatedUser);
         
-        // We only send columns that Supabase API definitely recognizes
+        // Send updates to Supabase
         final Map<String, dynamic> updates = {
-          'salary_amount': amount,
-          'salary_day': day,
+          'salary_amount': updatedUser.salaryAmount,
+          'salary_day': updatedUser.salaryDay,
           'total_salary_paid': updatedUser.totalSalaryPaid,
           'total_advances_taken': updatedUser.totalAdvancesTaken,
+          'total_loans_taken': updatedUser.totalLoansTaken,
+          'total_loans_repaid': updatedUser.totalLoansRepaid,
         };
         
         if (lastPaid != null) {
@@ -349,7 +355,19 @@ class UserNotifier extends StateNotifier<List<UserAccount>> {
           updates['last_payment_was_advance'] = isAdvance;
         }
 
-        await service.updateUserFields(userId, updates);
+        try {
+          await service.updateUserFields(userId, updates);
+        } catch (e) {
+          final errStr = e.toString();
+          if (errStr.contains('PGRST204') || errStr.contains('total_loans')) {
+            // Fallback if loan columns are not in schema cache
+            updates.remove('total_loans_taken');
+            updates.remove('total_loans_repaid');
+            await service.updateUserFields(userId, updates);
+          } else {
+            rethrow;
+          }
+        }
       }
     } catch (e) {
       debugPrint('Update Salary Error: $e');
