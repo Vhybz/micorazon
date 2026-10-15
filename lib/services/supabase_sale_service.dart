@@ -4,12 +4,13 @@ import '../core/supabase_config.dart';
 class SupabaseSaleService {
   final _client = SupabaseConfig.client;
 
-  Future<List<SaleRecord>> getSales(String branchCode) async {
+  Future<List<SaleRecord>> getSales(String branchCode, {int limit = 100}) async {
     final response = await _client
         .from('sales')
         .select()
         .eq('branch_code', branchCode)
-        .order('timestamp', ascending: false);
+        .order('timestamp', ascending: false)
+        .limit(limit);
     
     return (response as List).map((json) => SaleRecord.fromJson(json)).toList();
   }
@@ -30,12 +31,13 @@ class SupabaseSaleService {
     await _client.from('sales').delete().filter('id', 'in', '(${ids.join(',')})');
   }
 
-  Stream<List<SaleRecord>> getSalesStream(String branchCode) {
+  Stream<List<SaleRecord>> getSalesStream(String branchCode, {int limit = 100}) {
     return _client
         .from('sales')
         .stream(primaryKey: ['id'])
         .eq('branch_code', branchCode)
         .order('timestamp', ascending: false)
+        .limit(limit)
         .map((data) => data.map((json) => SaleRecord.fromJson(json)).toList());
   }
 }

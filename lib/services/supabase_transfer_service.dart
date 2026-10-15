@@ -4,11 +4,12 @@ import '../core/supabase_config.dart';
 class SupabaseTransferService {
   final _client = SupabaseConfig.client;
 
-  Future<List<StockTransfer>> getTransfers() async {
+  Future<List<StockTransfer>> getTransfers({int limit = 100}) async {
     final response = await _client
         .from('stock_transfers')
         .select()
-        .order('transfer_time', ascending: false);
+        .order('transfer_time', ascending: false)
+        .limit(limit);
     
     return (response as List).map((json) => StockTransfer.fromJson(json)).toList();
   }
@@ -24,11 +25,12 @@ class SupabaseTransferService {
         .eq('id', id);
   }
 
-  Stream<List<StockTransfer>> watchTransfers() {
+  Stream<List<StockTransfer>> watchTransfers({int limit = 100}) {
     return _client
         .from('stock_transfers')
         .stream(primaryKey: ['id'])
         .order('transfer_time', ascending: false)
+        .limit(limit)
         .map((data) => data.map((json) => StockTransfer.fromJson(json)).toList());
   }
 }

@@ -6,12 +6,13 @@ import '../core/supabase_config.dart';
 class SupabaseExpenseService {
   final _client = SupabaseConfig.client;
 
-  Future<List<ExpenseRecord>> getExpenses(String branchCode) async {
+  Future<List<ExpenseRecord>> getExpenses(String branchCode, {int limit = 100}) async {
     final response = await _client
         .from('expenses')
         .select()
         .eq('branch_code', branchCode)
-        .order('date', ascending: false);
+        .order('date', ascending: false)
+        .limit(limit);
     
     return (response as List).map((json) => ExpenseRecord.fromJson(json)).toList();
   }
@@ -28,12 +29,13 @@ class SupabaseExpenseService {
     await _client.from('expenses').delete().eq('id', id);
   }
 
-  Stream<List<ExpenseRecord>> watchExpenses(String branchCode) {
+  Stream<List<ExpenseRecord>> watchExpenses(String branchCode, {int limit = 100}) {
     return _client
         .from('expenses')
         .stream(primaryKey: ['id'])
         .eq('branch_code', branchCode)
         .order('date', ascending: false)
+        .limit(limit)
         .map((data) => data.map((json) => ExpenseRecord.fromJson(json)).toList());
   }
 

@@ -68,6 +68,8 @@ class OfflineSyncService {
       'type': actionType,
       'payload': data,
       'timestamp': DateTime.now().toIso8601String(),
+      'retry_count': 0,
+      'last_attempt': null,
     });
     
     debugPrint('Offline Engine: Action "$actionType" cached in Hive (ID: $requestId)');
@@ -100,6 +102,19 @@ class OfflineSyncService {
 
       final String type = item['type'];
       final Map<String, dynamic> payload = Map<String, dynamic>.from(item['payload']);
+      final int retries = item['retry_count'] as int? ?? 0;
+      final String? lastAttemptStr = item['last_attempt'] as String?;
+
+      if (lastAttemptStr != null) {
+        final lastAttempt = DateTime.tryParse(lastAttemptStr);
+        if (lastAttempt != null) {
+          // Bounded exponential backoff: 2^retries seconds (capped between 2s and 60s)
+          final backoffSeconds = (1 << retries.clamp(1, 6)).clamp(2, 60);
+          if (DateTime.now().difference(lastAttempt).inSeconds < backoffSeconds) {
+            continue; // Skip item until backoff window expires
+          }
+        }
+      }
 
       try {
         bool success = false;
@@ -247,6 +262,12 @@ class OfflineSyncService {
         final errorStr = e.toString().toUpperCase();
         debugPrint('Sync Monitor: FAILED to push item $key. Error: $e');
 
+        // Increment retry count & record last attempt timestamp
+        final itemMap = Map<String, dynamic>.from(item as Map);
+        itemMap['retry_count'] = (retries + 1);
+        itemMap['last_attempt'] = DateTime.now().toIso8601String();
+        await box.put(key, itemMap);
+
         // RECONCILIATION LOGIC FOR CONCURRENCY:
         // 1. DUPLICATE KEY (23505): Another device already synced this. Success!
         if (errorStr.contains('23505') || errorStr.contains('DUPLICATE KEY') || errorStr.contains('ALREADY EXISTS')) {
@@ -277,6 +298,24 @@ class OfflineSyncService {
     }
     
     _isProcessing = false;
+  }
+
+  /// Delta Sync Timestamps
+  static DateTime? getLastSyncTimestamp(String domainKey) {
+    try {
+      if (!Hive.isBoxOpen(settingsBoxName)) return null;
+      final val = Hive.box(settingsBoxName).get('last_sync_$domainKey');
+      if (val != null) return DateTime.tryParse(val.toString());
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> setLastSyncTimestamp(String domainKey, DateTime time) async {
+    try {
+      if (Hive.isBoxOpen(settingsBoxName)) {
+        await Hive.box(settingsBoxName).put('last_sync_$domainKey', time.toIso8601String());
+      }
+    } catch (_) {}
   }
 
   /// NEW: Retrieve pending actions of a specific type from the queue.
