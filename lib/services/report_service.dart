@@ -480,6 +480,7 @@ class ReportService {
     double soldKg = 0.0, soldUnits = 0.0;
     double stockKg = 0.0, stockUnits = 0.0;
     final totalRevenue = reportData.fold(0.0, (sum, d) => sum + d.totalRevenue);
+    final totalProfit = reportData.fold(0.0, (sum, d) => sum + d.totalProfit);
 
     for (final d in reportData) {
       final u = d.product.unit.trim().toLowerCase();
@@ -522,6 +523,7 @@ class ReportService {
             'Total Quantity Intaked': formatQtySummary(intakesKg, intakesUnits),
             'Total Quantity Sold': formatQtySummary(soldKg, soldUnits),
             'Gross Revenue Generated': 'GHS ${totalRevenue.toStringAsFixed(2)}',
+            'Total Profit Generated': 'GHS ${totalProfit.toStringAsFixed(2)}',
             'Current Stock Remaining': formatQtySummary(stockKg, stockUnits),
           }),
           pw.SizedBox(height: 15),
@@ -532,13 +534,14 @@ class ReportService {
             headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
             headerDecoration: const pw.BoxDecoration(color: _primaryMaroon),
             cellAlignment: pw.Alignment.centerLeft,
-            headers: ['Product Name', 'Category', 'Intaked Qty', 'Qty Sold', 'Revenue (GHS)', 'Remaining Stock'],
+            headers: ['Product Name', 'Category', 'Intaked Qty', 'Qty Sold', 'Revenue (GHS)', 'Profit (GHS)', 'Remaining Stock'],
             data: reportData.map((d) => [
               d.product.name,
               d.product.category,
               d.totalIntakeQty > 0 ? '+${d.totalIntakeQty.toStringAsFixed(1)} ${d.product.unit}' : '0.0 ${d.product.unit}',
               '${d.totalQtySold.toStringAsFixed(1)} ${d.product.unit}',
               d.totalRevenue.toStringAsFixed(2),
+              d.totalProfit.toStringAsFixed(2),
               '${d.remainingStock.toStringAsFixed(1)} ${d.product.unit}',
             ]).toList(),
           ),

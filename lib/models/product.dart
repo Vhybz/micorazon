@@ -311,6 +311,8 @@ class ProductActivityReportData {
   final DateTime? lastIntakeDate;
   final double totalQtySold;
   final double totalRevenue;
+  final double totalCost;
+  final double totalProfit;
   final List<Map<String, dynamic>> salesBreakdown;
   final double remainingStock;
 
@@ -321,7 +323,11 @@ class ProductActivityReportData {
     this.lastIntakeDate,
     required this.totalQtySold,
     required this.totalRevenue,
+    this.totalCost = 0.0,
+    this.totalProfit = 0.0,
     required this.salesBreakdown,
     required this.remainingStock,
   });
+
+  double get profitMarginPercentage => totalCost > 0 ? (totalProfit / totalCost) * 100 : 0.0;
 }

@@ -257,13 +257,21 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
       // 2. Calculate Sales & Revenue
       double totalQtySold = 0.0;
       double totalRevenue = 0.0;
+      double totalCost = 0.0;
+      double totalProfit = 0.0;
       final List<Map<String, dynamic>> salesBreakdown = [];
 
       for (var sale in periodSales) {
         for (var item in sale.items) {
           if (item.product.id == p.id) {
+            final itemCost = item.quantity * item.product.costPrice;
+            final itemProfit = item.total - itemCost;
+
             totalQtySold += item.quantity;
             totalRevenue += item.total;
+            totalCost += itemCost;
+            totalProfit += itemProfit;
+
             salesBreakdown.add({
               'sale_id': sale.id,
               'timestamp': sale.timestamp,
@@ -272,6 +280,8 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
               'quantity': item.quantity,
               'price_at_sale': item.priceAtSale,
               'total': item.total,
+              'cost': itemCost,
+              'profit': itemProfit,
             });
           }
         }
@@ -284,6 +294,8 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
         lastIntakeDate: lastIntakeDate,
         totalQtySold: totalQtySold,
         totalRevenue: totalRevenue,
+        totalCost: totalCost,
+        totalProfit: totalProfit,
         salesBreakdown: salesBreakdown,
         remainingStock: p.stockQuantity,
       ));
@@ -468,6 +480,7 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
     double soldKg = 0.0, soldUnits = 0.0;
     double stockKg = 0.0, stockUnits = 0.0;
     final totalRevenueGenerated = reportData.fold(0.0, (sum, d) => sum + d.totalRevenue);
+    final totalProfitGenerated = reportData.fold(0.0, (sum, d) => sum + d.totalProfit);
 
     for (final d in reportData) {
       final u = d.product.unit.trim().toLowerCase();
@@ -652,10 +665,10 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
 
                     // Executive Summary KPIs
                     GridView.count(
-                      crossAxisCount: isDesktop ? 4 : 2,
+                      crossAxisCount: isDesktop ? 5 : 2,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      childAspectRatio: isDesktop ? 2.2 : 1.7,
+                      childAspectRatio: isDesktop ? 2.0 : 1.7,
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       children: [
@@ -680,6 +693,12 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
                           '₵${currencyFormat.format(totalRevenueGenerated)}',
                           Icons.monetization_on_rounded,
                           Colors.green,
+                        ),
+                        _kpiCard(
+                          'Total Profit Generated',
+                          '₵${currencyFormat.format(totalProfitGenerated)}',
+                          Icons.trending_up_rounded,
+                          Colors.teal.shade700,
                         ),
                         _kpiCard(
                           'Total Remaining Stock',
@@ -735,6 +754,7 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
                                         DataColumn(label: Text('Last Intake Date', style: TextStyle(fontWeight: FontWeight.bold))),
                                         DataColumn(label: Text('Qty Sold', style: TextStyle(fontWeight: FontWeight.bold))),
                                         DataColumn(label: Text('Revenue Generated', style: TextStyle(fontWeight: FontWeight.bold))),
+                                        DataColumn(label: Text('Profit Generated', style: TextStyle(fontWeight: FontWeight.bold))),
                                         DataColumn(label: Text('Remaining Stock', style: TextStyle(fontWeight: FontWeight.bold))),
                                         DataColumn(label: Text('Action', style: TextStyle(fontWeight: FontWeight.bold))),
                                       ],
@@ -781,6 +801,12 @@ class _ProductActivityReportScreenState extends ConsumerState<ProductActivityRep
                                               Text(
                                                 '₵${d.totalRevenue.toStringAsFixed(2)}',
                                                 style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal),
+                                              ),
+                                            ),
+                                            DataCell(
+                                              Text(
+                                                '₵${d.totalProfit.toStringAsFixed(2)}',
+                                                style: TextStyle(fontWeight: FontWeight.bold, color: d.totalProfit >= 0 ? Colors.green.shade700 : Colors.red),
                                               ),
                                             ),
                                             DataCell(
