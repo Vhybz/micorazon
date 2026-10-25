@@ -4,7 +4,7 @@ import '../core/supabase_config.dart';
 class SupabaseSaleService {
   final _client = SupabaseConfig.client;
 
-  Future<List<SaleRecord>> getSales(String branchCode, {int limit = 100}) async {
+  Future<List<SaleRecord>> getSales(String branchCode, {int limit = 500}) async {
     final response = await _client
         .from('sales')
         .select()
@@ -31,7 +31,7 @@ class SupabaseSaleService {
     await _client.from('sales').delete().filter('id', 'in', '(${ids.join(',')})');
   }
 
-  Stream<List<SaleRecord>> getSalesStream(String branchCode, {int limit = 100}) {
+  Stream<List<SaleRecord>> getSalesStream(String branchCode, {int limit = 500}) {
     return _client
         .from('sales')
         .stream(primaryKey: ['id'])

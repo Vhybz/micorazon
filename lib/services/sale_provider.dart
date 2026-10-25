@@ -91,8 +91,8 @@ class SaleHistoryNotifier extends StateNotifier<List<SaleRecord>> {
     try {
       final box = Hive.box(OfflineSyncService.salesBoxName);
       box.clear();
-      // Keep only last 100 sales offline to save space
-      final toCache = sales.take(100).toList();
+      // Keep last 500 sales offline to ensure past days/weekends are always accessible
+      final toCache = sales.take(500).toList();
       for (var s in toCache) {
         box.put(s.id, s.toJson());
       }
