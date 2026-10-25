@@ -89,36 +89,49 @@ class TillNotifier extends StateNotifier<TillState> {
     for (var sale in sales) {
       if (sale.status == SaleStatus.cancelled || sale.status == SaleStatus.reversed) continue;
       
-      for (int i = 0; i < sale.payments.length; i++) {
-        final p = sale.payments[i];
-        if (p.amount <= 0) continue;
-
-        final pDate = (p.date ?? sale.timestamp).toLocal();
-        
-        final isDebtRepayment = i > 0 || 
-            (p.date != null && !DateUtils.isSameDay(p.date!.toLocal(), sale.timestamp.toLocal())) ||
-            (p.reference?.contains('Collection') ?? false);
-
-        final invoiceShort = sale.id.length > 8 ? sale.id.substring(sale.id.length - 8).toUpperCase() : sale.id.toUpperCase();
-
-        final methodLabel = p.method == PaymentMethod.cash 
-            ? 'Cash' 
-            : (p.method == PaymentMethod.mobileMoney ? 'MoMo' : 'Bank');
-
-        final title = isDebtRepayment ? 'Debt Collection ($methodLabel)' : 'Sale Received ($methodLabel)';
-        final description = isDebtRepayment
-            ? 'Debt payment by ${sale.customerName ?? "Customer"} for #$invoiceShort ($methodLabel)'
-            : 'Invoice #$invoiceShort ($methodLabel)';
-
+      if (sale.payments.isEmpty) {
+        // Fallback for sales without explicit payment array items
         movements.add(TillMovement(
-          id: '${sale.id}_p$i',
-          title: title,
-          description: description,
-          amount: p.amount,
-          timestamp: pDate,
+          id: '${sale.id}_p0',
+          title: 'Sale Received (Cash)',
+          description: 'Invoice #${sale.id.length > 8 ? sale.id.substring(sale.id.length - 8).toUpperCase() : sale.id.toUpperCase()} (Cash)',
+          amount: sale.totalAmount,
+          timestamp: sale.timestamp.toLocal(),
           type: TillMovementType.cashIn,
           userName: sale.cashierName,
         ));
+      } else {
+        for (int i = 0; i < sale.payments.length; i++) {
+          final p = sale.payments[i];
+          if (p.amount <= 0) continue;
+
+          final pDate = (p.date ?? sale.timestamp).toLocal();
+          
+          final isDebtRepayment = i > 0 || 
+              (p.date != null && !DateUtils.isSameDay(p.date!.toLocal(), sale.timestamp.toLocal())) ||
+              (p.reference?.contains('Collection') ?? false);
+
+          final invoiceShort = sale.id.length > 8 ? sale.id.substring(sale.id.length - 8).toUpperCase() : sale.id.toUpperCase();
+
+          final methodLabel = p.method == PaymentMethod.cash 
+              ? 'Cash' 
+              : (p.method == PaymentMethod.mobileMoney ? 'MoMo' : 'Bank');
+
+          final title = isDebtRepayment ? 'Debt Collection ($methodLabel)' : 'Sale Received ($methodLabel)';
+          final description = isDebtRepayment
+              ? 'Debt payment by ${sale.customerName ?? "Customer"} for #$invoiceShort ($methodLabel)'
+              : 'Invoice #$invoiceShort ($methodLabel)';
+
+          movements.add(TillMovement(
+            id: '${sale.id}_p$i',
+            title: title,
+            description: description,
+            amount: p.amount,
+            timestamp: pDate,
+            type: TillMovementType.cashIn,
+            userName: sale.cashierName,
+          ));
+        }
       }
     }
 

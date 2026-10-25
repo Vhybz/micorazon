@@ -1749,23 +1749,31 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
               itemCount: filteredDates.length,
               itemBuilder: (context, index) {
                 final date = filteredDates[index];
-                final pendingAmount = tillState.pendingByDay[date] ?? 0.0;
+                final rawPendingAmount = tillState.pendingByDay[date] ?? 0.0;
                 final closures = tillState.closuresByDay[date] ?? [];
                 final debtCollections = TillNotifier.getDebtCollectionsForDate(date, salesHistory);
                 final double debtTotal = debtCollections.fold(0.0, (sum, c) => sum + c.amountPaid);
                 
                 final isToday = date == today;
                 final isPast = date.isBefore(today);
-                final hasPending = pendingAmount > 0.01;
 
                 // Find most purchased item for this specific day
                 final daySales = salesHistory.where((s) => 
-                  s.timestamp.year == date.year && 
-                  s.timestamp.month == date.month && 
-                  s.timestamp.day == date.day &&
+                  s.timestamp.toLocal().year == date.year && 
+                  s.timestamp.toLocal().month == date.month && 
+                  s.timestamp.toLocal().day == date.day &&
                   s.status != SaleStatus.cancelled &&
                   s.status != SaleStatus.reversed
                 ).toList();
+
+                final double dayTotalSales = daySales.fold(0.0, (sum, s) => sum + s.totalAmount);
+                final bool hasClosures = closures.isNotEmpty;
+
+                final double pendingAmount = hasClosures 
+                    ? rawPendingAmount 
+                    : (rawPendingAmount > 0 ? rawPendingAmount : dayTotalSales);
+                
+                final bool hasPending = pendingAmount > 0.01;
 
                 String topItemName = 'N/A';
                 String topItemCategory = '';
