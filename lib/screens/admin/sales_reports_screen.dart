@@ -1646,11 +1646,27 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     
-    // Combine all dates that have either pending cash or previous closures
-    final allDates = {
+    // Generate contiguous calendar days from today back to the earliest recorded transaction
+    final Set<DateTime> datesSet = {
+      today,
       ...tillState.pendingByDay.keys,
       ...tillState.closuresByDay.keys,
-    }.toList()..sort((a, b) => b.compareTo(a));
+      ...salesHistory.map((s) {
+        final localTs = s.timestamp.toLocal();
+        return DateTime(localTs.year, localTs.month, localTs.day);
+      }),
+    };
+
+    if (datesSet.isNotEmpty) {
+      final earliest = datesSet.reduce((a, b) => a.isBefore(b) ? a : b);
+      DateTime curr = earliest;
+      while (!curr.isAfter(today)) {
+        datesSet.add(curr);
+        curr = curr.add(const Duration(days: 1));
+      }
+    }
+
+    final allDates = datesSet.toList()..sort((a, b) => b.compareTo(a));
 
     final filteredDates = allDates.where((date) {
       if (_salesLogSearchQuery.isEmpty) return true;

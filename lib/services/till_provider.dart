@@ -93,10 +93,10 @@ class TillNotifier extends StateNotifier<TillState> {
         final p = sale.payments[i];
         if (p.amount <= 0) continue;
 
-        final pDate = p.date ?? sale.timestamp;
+        final pDate = (p.date ?? sale.timestamp).toLocal();
         
         final isDebtRepayment = i > 0 || 
-            (p.date != null && !DateUtils.isSameDay(p.date, sale.timestamp)) ||
+            (p.date != null && !DateUtils.isSameDay(p.date!.toLocal(), sale.timestamp.toLocal())) ||
             (p.reference?.contains('Collection') ?? false);
 
         final invoiceShort = sale.id.length > 8 ? sale.id.substring(sale.id.length - 8).toUpperCase() : sale.id.toUpperCase();
@@ -135,7 +135,7 @@ class TillNotifier extends StateNotifier<TillState> {
         title: expense.category,
         description: expense.title,
         amount: expense.amount,
-        timestamp: expense.date,
+        timestamp: expense.date.toLocal(),
         type: isOpeningBalance 
             ? TillMovementType.openingBalance 
             : TillMovementType.closure,
@@ -152,7 +152,8 @@ class TillNotifier extends StateNotifier<TillState> {
     final Map<DateTime, List<TillMovement>> closuresByDay = {};
 
     for (var m in movements) {
-      final date = DateTime(m.timestamp.year, m.timestamp.month, m.timestamp.day);
+      final localTs = m.timestamp.toLocal();
+      final date = DateTime(localTs.year, localTs.month, localTs.day);
 
       if (m.type == TillMovementType.cashIn || m.type == TillMovementType.openingBalance) {
         cashInByDay[date] = (cashInByDay[date] ?? 0.0) + m.amount;
