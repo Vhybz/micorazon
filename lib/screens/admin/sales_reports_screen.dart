@@ -1859,7 +1859,9 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               Text(
-                                hasPending ? '₵ ${pendingAmount.toStringAsFixed(2)}' : 'Fully Closed',
+                                hasPending 
+                                    ? '₵ ${pendingAmount.toStringAsFixed(2)}' 
+                                    : (closures.isNotEmpty ? 'Fully Closed' : 'No Sales Recorded (₵0.00)'),
                                 style: TextStyle(
                                   fontSize: 20, 
                                   fontWeight: FontWeight.w900,
@@ -1885,7 +1887,11 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                   ),
                                 )
                               else
-                                const Icon(Icons.verified_user_rounded, color: Colors.green, size: 24),
+                                Icon(
+                                  closures.isNotEmpty ? Icons.verified_user_rounded : Icons.info_outline_rounded, 
+                                  color: closures.isNotEmpty ? Colors.green : Colors.grey, 
+                                  size: 24,
+                                ),
                             ],
                           ),
                         ] else ...[
@@ -1900,7 +1906,7 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                 child: Icon(
                                   hasPending 
                                     ? (isPast ? Icons.warning_amber_rounded : Icons.calendar_today_rounded)
-                                    : Icons.check_circle_rounded,
+                                    : (closures.isNotEmpty ? Icons.check_circle_rounded : Icons.info_outline_rounded),
                                   color: hasPending 
                                     ? (isPast ? Colors.red : Colors.green.shade700)
                                     : Colors.grey,
@@ -1924,7 +1930,9 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      hasPending ? '₵ ${pendingAmount.toStringAsFixed(2)}' : 'Fully Closed',
+                                      hasPending 
+                                          ? '₵ ${pendingAmount.toStringAsFixed(2)}' 
+                                          : (closures.isNotEmpty ? 'Fully Closed' : 'No Sales Recorded (₵0.00)'),
                                       style: TextStyle(
                                         fontSize: 22, 
                                         fontWeight: FontWeight.w900,
@@ -1953,7 +1961,11 @@ class _SalesReportsScreenState extends ConsumerState<SalesReportsScreen> with Si
                                   ),
                                 )
                               else
-                                const Icon(Icons.verified_user_rounded, color: Colors.green, size: 28),
+                                Icon(
+                                  closures.isNotEmpty ? Icons.verified_user_rounded : Icons.info_outline_rounded, 
+                                  color: closures.isNotEmpty ? Colors.green : Colors.grey, 
+                                  size: 28,
+                                ),
                             ],
                           ),
                         ],
