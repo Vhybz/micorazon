@@ -87,10 +87,17 @@ class SupabaseProductService implements ProductService {
 
   @override
   Future<void> deleteProduct(String id) async {
-    await _client
-        .from('products')
-        .delete()
-        .eq('id', id);
+    try {
+      await _client
+          .from('products')
+          .update({'is_deleted': true})
+          .eq('id', id);
+    } catch (_) {
+      await _client
+          .from('products')
+          .delete()
+          .eq('id', id);
+    }
   }
 
   @override

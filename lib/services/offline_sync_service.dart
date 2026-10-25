@@ -229,7 +229,11 @@ class OfflineSyncService {
             success = true;
             break;
           case 'DELETE_PRODUCT':
-            await SupabaseConfig.client.from('products').delete().eq('id', payload['id']);
+            try {
+              await SupabaseConfig.client.from('products').update({'is_deleted': true}).eq('id', payload['id']);
+            } catch (_) {
+              await SupabaseConfig.client.from('products').delete().eq('id', payload['id']);
+            }
             success = true;
             break;
           case 'DELETE_SALE':

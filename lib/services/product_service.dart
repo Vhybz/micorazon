@@ -276,7 +276,13 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
   }
 
   Future<void> deleteProduct(String id) async {
-    // 1. Optimistic local update
+    // 1. Queue offline action FIRST so it is immediately protected from being restored by any background stream refresh
+    await OfflineSyncService.addToQueue(
+      actionType: 'DELETE_PRODUCT',
+      data: {'id': id},
+    );
+
+    // 2. Optimistic local state update for immediate removal on screen
     state.whenData((products) {
       final newList = products.where((p) => p.id != id).toList();
       state = AsyncValue.data(newList);
@@ -288,14 +294,9 @@ class ProductNotifier extends StateNotifier<AsyncValue<List<Product>>> {
       if (!connectivity.contains(ConnectivityResult.none)) {
         await _service.deleteProduct(id);
         await loadProducts();
-      } else {
-        throw Exception('Offline');
       }
     } catch (e) {
-      await OfflineSyncService.addToQueue(
-        actionType: 'DELETE_PRODUCT',
-        data: {'id': id},
-      );
+      debugPrint('Delete product queued offline or soft-deleted: $e');
     }
   }
 
