@@ -670,7 +670,7 @@ final userProvider = StateNotifierProvider<UserNotifier, List<UserAccount>>((ref
 
 final userLoadingProvider = StateProvider<bool>((ref) => false);
 
-/// A heartbeat provider that triggers every 3 seconds to keep things "live"
+/// A heartbeat provider that triggers every 30 seconds to keep live elements evaluated cleanly without log bloat
 final liveHeartbeatProvider = StreamProvider<int>((ref) {
-  return Stream.periodic(const Duration(seconds: 3), (count) => count);
+  return Stream.periodic(const Duration(seconds: 30), (count) => count);
 });

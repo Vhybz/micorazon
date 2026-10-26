@@ -67,19 +67,24 @@ class SyncNotifier extends StateNotifier<CloudSyncState> with WidgetsBindingObse
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      debugPrint('Sync Monitor: App Resumed. Forcing immediate cloud sync...');
+      debugPrint('Sync Monitor: App Resumed. Processing queue & syncing...');
+      _startSyncTimer();
       syncAll();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      debugPrint('Sync Monitor: App Paused. Pausing sync timer to save API logs...');
+      _timer?.cancel();
     }
   }
 
   void _startSyncTimer() {
     _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    // Run background sync check every 5 minutes instead of 30 seconds to prevent API log bloat
+    _timer = Timer.periodic(const Duration(minutes: 5), (timer) {
       syncAll();
     });
   }
 
-  Future<void> syncAll() async {
+  Future<void> syncAll({bool forceRefreshAll = false}) async {
     if (!mounted || state.isSyncing) return;
 
     try {
@@ -111,16 +116,17 @@ class SyncNotifier extends StateNotifier<CloudSyncState> with WidgetsBindingObse
       // 1. Process offline queue first
       await OfflineSyncService.processQueue();
       
-      // 2. Refresh key data sets to ensure cache is hot and Supabase is source of truth
-      // Note: Realtime streams also handle this, but manual refresh ensures Req 3 is met.
-      await Future.wait([
-        _safeRefresh(productsFutureProvider.notifier, (n) => n.loadProducts()),
-        _safeRefresh(transferProvider.notifier, (n) => n.loadTransfers()),
-        _safeRefresh(customerProvider.notifier, (n) => n.loadCustomers()),
-        _safeRefresh(saleHistoryProvider.notifier, (n) => n.loadSales()),
-        _safeRefresh(expenseProvider.notifier, (n) => n.loadExpenses()),
-        _safeRefresh(notificationProvider.notifier, (n) => n.loadNotifications()),
-      ]);
+      // 2. Only perform full REST re-fetch if forced or if there were pending offline items
+      if (forceRefreshAll || OfflineSyncService.getPendingCount() > 0) {
+        await Future.wait([
+          _safeRefresh(productsFutureProvider.notifier, (n) => n.loadProducts()),
+          _safeRefresh(transferProvider.notifier, (n) => n.loadTransfers()),
+          _safeRefresh(customerProvider.notifier, (n) => n.loadCustomers()),
+          _safeRefresh(saleHistoryProvider.notifier, (n) => n.loadSales()),
+          _safeRefresh(expenseProvider.notifier, (n) => n.loadExpenses()),
+          _safeRefresh(notificationProvider.notifier, (n) => n.loadNotifications()),
+        ]);
+      }
 
       if (mounted) {
         state = state.copyWith(
