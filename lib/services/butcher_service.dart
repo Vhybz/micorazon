@@ -6,6 +6,7 @@ import 'supabase_butcher_service.dart';
 import 'user_provider.dart';
 import 'audit_service.dart';
 import 'product_service.dart';
+import 'offline_sync_service.dart';
 import '../models/product.dart';
 import '../core/supabase_config.dart';
 
@@ -45,6 +46,15 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
   }
 
   Future<void> loadLogs({bool silent = false}) async {
+    try {
+      final user = ref.read(currentUserProvider);
+      if (user?.branchCode != null) {
+        final logs = await _service.getSlaughterLogs(user!.branchCode!);
+        state = AsyncValue.data(logs);
+      }
+    } catch (e) {
+      debugPrint('Error loading slaughter logs via REST: $e');
+    }
     _startSubscription();
   }
 
@@ -55,11 +65,17 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
   }
 
   Future<void> addLog(SlaughterLog log) async {
+    final branchCode = ref.read(currentUserProvider)?.branchCode;
+    if (branchCode == null) throw Exception('No branch code assigned');
+    final logWithBranch = log.copyWith(branchCode: branchCode);
+
+    // 1. Optimistic local state update so the new intake appears in the table INSTANTLY!
+    state.whenData((logs) {
+      final updated = [logWithBranch, ...logs.where((l) => l.id != logWithBranch.id)];
+      state = AsyncValue.data(updated);
+    });
+
     try {
-      final branchCode = ref.read(currentUserProvider)?.branchCode;
-      if (branchCode == null) throw Exception('No branch code assigned');
-      final logWithBranch = log.copyWith(branchCode: branchCode);
-      
       await _service.addSlaughterLog(logWithBranch);
       await AuditService.log(
         ref: ref, 
@@ -68,8 +84,13 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
         entityId: logWithBranch.id,
         newData: logWithBranch.toJson(),
       );
+      await loadLogs(silent: true);
     } catch (e) {
-      debugPrint('Error adding slaughter log: $e');
+      debugPrint('Error adding slaughter log, queuing offline: $e');
+      await OfflineSyncService.addToQueue(
+        actionType: 'INTAKE',
+        data: logWithBranch.toJson(),
+      );
     }
   }
 
@@ -139,6 +160,11 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
     required SlaughterLog log,
     required String sourceFarm,
   }) async {
+    state.whenData((logs) {
+      final updated = logs.map((l) => l.id == log.id ? log : l).toList();
+      state = AsyncValue.data(updated);
+    });
+
     try {
       await _service.updateSlaughterLog(log);
       await _service.updateAnimal(
@@ -159,8 +185,10 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
         entityId: log.id,
         newData: log.toJson(),
       );
+      await loadLogs(silent: true);
     } catch (e) {
       debugPrint('Error updating intake: $e');
+      await loadLogs(silent: true);
       rethrow;
     }
   }
