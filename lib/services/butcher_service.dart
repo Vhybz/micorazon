@@ -95,17 +95,32 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
   }
 
   Future<void> updateStatus(String id, SlaughterStatus status) async {
-    try {
-      final user = ref.read(currentUserProvider);
-      final time = (status == SlaughterStatus.slaughtering || status == SlaughterStatus.completed) 
-          ? DateTime.now() 
-          : null;
-      
-      String? slaughteredBy;
-      if (status == SlaughterStatus.completed) {
-        slaughteredBy = user?.name;
-      }
+    final user = ref.read(currentUserProvider);
+    final time = (status == SlaughterStatus.slaughtering || status == SlaughterStatus.completed) 
+        ? DateTime.now() 
+        : null;
+    
+    String? slaughteredBy;
+    if (status == SlaughterStatus.completed) {
+      slaughteredBy = user?.name;
+    }
 
+    // 1. Optimistic local state update so button changes on screen INSTANTLY (<10ms)!
+    state.whenData((logs) {
+      final updated = logs.map((l) {
+        if (l.id == id) {
+          return l.copyWith(
+            status: status,
+            slaughterTime: time ?? l.slaughterTime,
+            slaughteredBy: slaughteredBy ?? l.slaughteredBy,
+          );
+        }
+        return l;
+      }).toList();
+      state = AsyncValue.data(updated);
+    });
+
+    try {
       await _service.updateSlaughterStatus(id, status, time: time, slaughteredBy: slaughteredBy);
 
       await AuditService.log(
@@ -118,16 +133,25 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
           'butcher': slaughteredBy,
         },
       );
+      await loadLogs(silent: true);
     } catch (e) {
       debugPrint('Error updating status: $e');
+      await loadLogs(silent: true);
     }
   }
 
   Future<void> updateSlaughterRecord(SlaughterLog log) async {
+    state.whenData((logs) {
+      final updated = logs.map((l) => l.id == log.id ? log : l).toList();
+      state = AsyncValue.data(updated);
+    });
+
     try {
       await _service.updateSlaughterLog(log);
+      await loadLogs(silent: true);
     } catch (e) {
       debugPrint('Error updating slaughter record: $e');
+      await loadLogs(silent: true);
     }
   }
 
