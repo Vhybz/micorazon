@@ -9,10 +9,9 @@ class SupabaseButcherService {
     final response = await _client
         .from('slaughter_logs')
         .select('*, animals(tag_number, source_farm)')
-        .eq('branch_code', branchCode)
-        .order('slaughter_time', ascending: false, nullsFirst: true);
+        .eq('branch_code', branchCode);
     
-    return (response as List).map((json) {
+    final list = (response as List).map((json) {
       final Map<String, dynamic> data = Map<String, dynamic>.from(json);
       if (data['animals'] != null) {
         data['tag_number'] = data['animals']['tag_number'];
@@ -20,6 +19,9 @@ class SupabaseButcherService {
       }
       return SlaughterLog.fromJson(data);
     }).toList();
+
+    list.sort((a, b) => b.id.compareTo(a.id));
+    return list;
   }
 
   Stream<List<SlaughterLog>> watchSlaughterLogs(String branchCode) {
@@ -27,8 +29,11 @@ class SupabaseButcherService {
         .from('slaughter_logs')
         .stream(primaryKey: ['id'])
         .eq('branch_code', branchCode)
-        .order('slaughter_time', ascending: false)
-        .map((data) => data.map((json) => SlaughterLog.fromJson(json)).toList());
+        .map((data) {
+          final list = data.map((json) => SlaughterLog.fromJson(json)).toList();
+          list.sort((a, b) => b.id.compareTo(a.id));
+          return list;
+        });
   }
 
   Future<void> addAnimal(String branchCode, String animalUuid, String tagNumber, AnimalType type, double weight, String sourceFarm, {int quantity = 1, double? price, double? farmPrice, String? manualFarmTag}) async {

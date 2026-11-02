@@ -33,10 +33,17 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
     final user = ref.read(currentUserProvider);
     if (user?.branchCode != null) {
       _subscription = _service.watchSlaughterLogs(user!.branchCode!).listen(
-        (logs) => state = AsyncValue.data(logs),
+        (streamLogs) {
+          final current = state.value ?? [];
+          final Map<String, SlaughterLog> map = {for (var l in streamLogs) l.id: l};
+          // Preserve optimistic local updates so entries never vanish on stream reconnect
+          for (var l in current) {
+            map.putIfAbsent(l.id, () => l);
+          }
+          state = AsyncValue.data(map.values.toList());
+        },
         onError: (e, st) {
           debugPrint('Slaughter Logs Stream Error (Resuming?): $e');
-          // Don't update state to error to avoid red screen, just log it.
         },
         cancelOnError: false,
       );
