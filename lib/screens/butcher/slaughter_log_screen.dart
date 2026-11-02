@@ -19,6 +19,7 @@ class SlaughterLogScreen extends ConsumerStatefulWidget {
 class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
   String _searchQuery = '';
   AnimalType? _filterType;
+  final Set<String> _processingLogIds = {};
 
   @override
   Widget build(BuildContext context) {
@@ -274,12 +275,13 @@ class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
     }
 
     final notifier = ref.read(slaughterLogsProvider.notifier);
+    final isProcessing = _processingLogIds.contains(log.id);
     
     // Unified Step-by-Step Progression Button
     final IconData icon;
     final String label;
     final Color color;
-    final VoidCallback onPressed;
+    final Future<void> Function() onPressed;
 
     switch (log.status) {
       case SlaughterStatus.pending:
@@ -298,7 +300,7 @@ class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
         icon = Icons.done_all;
         label = 'CARCASS';
         color = Colors.green;
-        onPressed = () {
+        onPressed = () async {
           ref.read(activeSlaughterLogProvider.notifier).state = log;
           ref.read(butcherNavProvider.notifier).setScreen(ButcherScreen.carcassBreakdown);
         };
@@ -308,10 +310,21 @@ class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
     }
 
     return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 14),
+      onPressed: isProcessing ? null : () async {
+        setState(() => _processingLogIds.add(log.id));
+        try {
+          await onPressed();
+        } finally {
+          if (mounted) {
+            setState(() => _processingLogIds.remove(log.id));
+          }
+        }
+      },
+      icon: isProcessing 
+          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+          : Icon(icon, size: 14),
       label: Flexible(
-        child: Text(label, 
+        child: Text(isProcessing ? 'SAVING...' : label, 
           style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
           overflow: TextOverflow.ellipsis,
           maxLines: 1,
