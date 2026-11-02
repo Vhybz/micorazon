@@ -166,6 +166,12 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
   }
 
   Future<void> deleteIntake(SlaughterLog log) async {
+    // 1. Optimistic local state update so it disappears from UI immediately
+    state.whenData((logs) {
+      final updated = logs.where((l) => l.id != log.id).toList();
+      state = AsyncValue.data(updated);
+    });
+
     try {
       await _service.deleteSlaughterIntake(log.id, log.animalId);
       
@@ -176,8 +182,10 @@ class SlaughterLogNotifier extends StateNotifier<AsyncValue<List<SlaughterLog>>>
         entityId: log.id,
         oldData: log.toJson(),
       );
+      await loadLogs(silent: true);
     } catch (e) {
       debugPrint('Error deleting intake: $e');
+      await loadLogs(silent: true);
       rethrow;
     }
   }

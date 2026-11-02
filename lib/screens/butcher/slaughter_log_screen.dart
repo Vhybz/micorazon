@@ -167,9 +167,11 @@ class _SlaughterLogScreenState extends ConsumerState<SlaughterLogScreen> {
     
     final activeRole = user.activePrimaryRole;
     final canManage = activeRole == UserRole.admin || activeRole == UserRole.superAdmin || activeRole == UserRole.butcher;
+    final isRoleAdmin = activeRole == UserRole.admin || activeRole == UserRole.superAdmin;
     
-    // Only allow edit/delete if not processed
-    if (!canManage || log.status == SlaughterStatus.processed) return const SizedBox.shrink();
+    // Admins can delete at any time; butchers can manage if not yet processed
+    if (!canManage) return const SizedBox.shrink();
+    if (!isRoleAdmin && log.status == SlaughterStatus.processed) return const SizedBox.shrink();
 
     return PopupMenuButton<String>(
       onSelected: (val) {

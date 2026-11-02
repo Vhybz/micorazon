@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../models/butcher_models.dart';
 import '../core/supabase_config.dart';
 
@@ -92,9 +93,17 @@ class SupabaseButcherService {
   }
 
   Future<void> deleteSlaughterIntake(String logId, String animalId) async {
-    // Delete log first due to foreign key (actually animal is referenced by log, so log first)
-    await _client.from('slaughter_logs').delete().eq('id', logId);
-    await _client.from('animals').delete().eq('id', animalId);
+    try {
+      await _client.from('slaughter_logs').delete().eq('id', logId);
+    } catch (e) {
+      debugPrint('Error deleting slaughter log row: $e');
+    }
+
+    try {
+      await _client.from('animals').delete().eq('id', animalId);
+    } catch (e) {
+      debugPrint('Error deleting animal row (ignorable): $e');
+    }
   }
 
   Future<List<MeatBatch>> getActiveBatches(String branchCode) async {
